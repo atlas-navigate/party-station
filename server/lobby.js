@@ -1,0 +1,473 @@
+// Session orchestration: players, the single lobby/game session, bots, saves.
+//
+// Roles: 'player' clients (phones) and 'tv' clients (the big screen).
+// Phases: hub -> lobby -> game -> gameover -> hub.
+//
+// Turn-based games ("server" mode) run their engine here; bots are scheduled
+// with human-feeling delays. Real-time arcade games ("relay" mode) run their
+// simulation in the TV browser; this server just relays phone inputs to it.
+import crypto from 'crypto';
+import { byId, catalog } from './registry.js';
+import * as saves from './saves.js';
+import * as updater from './updater.js';
+import { botName } from './bots.js';
+
+const players = new Map();   // pid -> {id, name, token, ws, connected}
+const tvSockets = new Set();
+
+let phase = 'hub';
+let lobby = null;    // {gameId, hostPid, humans:[pid], bots:[name], options:{}}
+let session = null;  // {gameId, mode, options, seats:[{name,bot,pid}], game, over, botTimers:Map}
+
+const send = (ws, msg) => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg)); };
+const uid = () => crypto.randomBytes(8).toString('hex');
+
+// ---------------------------------------------------------------- state sync
+
+function gameLite() {
+  return catalog().map(m => ({
+    id: m.id, name: m.name, tagline: m.tagline, icon: m.icon, category: m.category,
+    minPlayers: m.minPlayers, maxPlayers: m.maxPlayers, mode: m.mode, options: m.options || [],
+  }));
+}
+
+function hostPid() {
+  if (phase === 'lobby') return lobby?.hostPid;
+  if (session) {
+    const seat = session.seats.find(s => !s.bot && s.pid && players.get(s.pid)?.connected);
+    return seat?.pid;
+  }
+  return null;
+}
+
+function sharedState() {
+  return {
+    games: gameLite(),
+    saves: saves.summaries(),
+    players: [...players.values()].filter(p => p.connected).map(p => ({ name: p.name })),
+    tvCount: tvSockets.size,
+    version: updater.status.version,
+    updateAvailable: updater.status.updateAvailable,
+    updating: updater.status.updating,
+  };
+}
+
+function syncFor(recipient, isTV, shared = sharedState()) {
+  const msg = { t: 'sync', phase, ...shared };
+  if (!isTV && recipient) {
+    msg.you = { id: recipient.id, name: recipient.name };
+  } else {
+    msg.isTV = true;
+  }
+  if (phase === 'lobby' && lobby) {
+    msg.lobby = {
+      gameId: lobby.gameId,
+      hostName: players.get(lobby.hostPid)?.name,
+      youAreHost: !isTV && recipient?.id === lobby.hostPid,
+      youJoined: !isTV && lobby.humans.includes(recipient?.id),
+      seats: [
+        ...lobby.humans.map(pid => ({ name: players.get(pid)?.name || '?', bot: false })),
+        ...lobby.bots.map(n => ({ name: n, bot: true })),
+      ],
+      options: lobby.options,
+    };
+  }
+  if ((phase === 'game' || phase === 'gameover') && session) {
+    const yourSeat = !isTV && recipient
+      ? session.seats.findIndex(s => s.pid === recipient.id) : -1;
+    msg.game = {
+      gameId: session.gameId,
+      mode: session.mode,
+      options: session.options,
+      seats: session.seats.map(s => ({
+        name: s.name, bot: s.bot,
+        connected: s.bot ? true : !!(s.pid && players.get(s.pid)?.connected),
+      })),
+      yourSeat,
+      youAreHost: !isTV && recipient?.id === hostPid(),
+      over: session.over || null,
+    };
+    if (session.mode === 'server' && session.game) {
+      msg.game.pub = session.game.pub();
+      if (yourSeat >= 0) msg.game.priv = session.game.priv(yourSeat);
+      msg.game.awaiting = session.game.awaiting();
+    }
+  }
+  return msg;
+}
+
+export function broadcast() {
+  const shared = sharedState();
+  for (const p of players.values()) if (p.connected) send(p.ws, syncFor(p, false, shared));
+  for (const ws of tvSockets) send(ws, syncFor(null, true, shared));
+}
+
+function toast(target, text) {
+  if (target === 'all') {
+    for (const p of players.values()) send(p.ws, { t: 'toast', text });
+    for (const ws of tvSockets) send(ws, { t: 'toast', text });
+  } else send(target.ws, { t: 'toast', text });
+}
+
+// ---------------------------------------------------------------- lifecycle
+
+function uniqueName(raw, selfPid) {
+  let name = String(raw || '').trim().slice(0, 16) || 'Player';
+  const taken = [...players.values()].filter(p => p.id !== selfPid).map(p => p.name.toLowerCase());
+  let n = name, i = 2;
+  while (taken.includes(n.toLowerCase())) n = `${name} ${i++}`;
+  return n;
+}
+
+function attachPlayer(ws, hello) {
+  // Resume by token first; then reclaim a disconnected player by name
+  // (helps phones that dropped localStorage or switched browsers).
+  let p = hello.token && [...players.values()].find(x => x.token === hello.token);
+  if (!p && hello.name) {
+    p = [...players.values()].find(
+      x => !x.connected && x.name.toLowerCase() === String(hello.name).trim().toLowerCase());
+  }
+  if (!p) {
+    p = { id: uid(), token: uid(), name: '', ws: null, connected: false };
+    p.name = uniqueName(hello.name, p.id);
+    players.set(p.id, p);
+  }
+  if (p.ws && p.ws !== ws) { try { p.ws.close(); } catch {} }
+  p.ws = ws;
+  p.connected = true;
+  ws._pid = p.id;
+  send(ws, { t: 'welcome', id: p.id, token: p.token, name: p.name });
+  return p;
+}
+
+function cleanupSession() {
+  if (session) for (const t of session.botTimers.values()) clearTimeout(t);
+  session = null;
+}
+
+function returnToHub() {
+  cleanupSession();
+  lobby = null;
+  phase = 'hub';
+  broadcast();
+}
+
+// ---------------------------------------------------------------- lobby ops
+
+function openLobby(p, gameId) {
+  const mod = byId(gameId);
+  if (!mod || phase !== 'hub') return;
+  const options = {};
+  for (const o of mod.meta.options || []) options[o.key] = o.def;
+  lobby = { gameId, hostPid: p.id, humans: [p.id], bots: [], options };
+  phase = 'lobby';
+  broadcast();
+}
+
+function lobbySize() { return lobby.humans.length + lobby.bots.length; }
+
+function startGame() {
+  const mod = byId(lobby.gameId);
+  const meta = mod.meta;
+  // Fill with bots up to the minimum player count.
+  while (lobbySize() < meta.minPlayers) {
+    lobby.bots.push(botName([...lobby.bots, ...lobby.humans.map(h => players.get(h)?.name)]));
+  }
+  if (meta.mode === 'relay' && tvSockets.size === 0) {
+    toast(players.get(lobby.hostPid), 'This game needs the big screen. Open the TV page first (see Settings).');
+    return;
+  }
+  const seats = [
+    ...lobby.humans.map(pid => ({ name: players.get(pid)?.name || '?', bot: false, pid })),
+    ...lobby.bots.map(name => ({ name, bot: true, pid: null })),
+  ];
+  session = {
+    gameId: lobby.gameId, mode: meta.mode, options: lobby.options,
+    seats, game: null, over: null, botTimers: new Map(),
+  };
+  if (meta.mode === 'server') {
+    session.game = mod.create({
+      seats: seats.map(s => ({ name: s.name, bot: s.bot })),
+      options: lobby.options,
+    });
+  }
+  lobby = null;
+  phase = 'game';
+  pump();
+  broadcast();
+}
+
+function resumeGame(p, gameId) {
+  if (phase !== 'hub') return;
+  const mod = byId(gameId);
+  const data = saves.load(gameId);
+  if (!mod || !data) { toast(p, 'No saved game found.'); return; }
+  const unclaimed = [...players.values()].filter(x => x.connected);
+  const seats = data.seats.map(s => {
+    const match = !s.bot && unclaimed.find(x => x.name.toLowerCase() === s.name.toLowerCase());
+    if (match) {
+      unclaimed.splice(unclaimed.indexOf(match), 1);
+      return { name: match.name, bot: false, pid: match.id };
+    }
+    return { name: s.name, bot: true, pid: null }; // absent humans become bots (can be taken over)
+  });
+  try {
+    const game = mod.restore(
+      { seats: seats.map(s => ({ name: s.name, bot: s.bot })), options: data.options },
+      data.state);
+    session = { gameId, mode: 'server', options: data.options, seats, game, over: null, botTimers: new Map() };
+    phase = 'game';
+    pump();
+    broadcast();
+  } catch (e) {
+    console.error('resume failed', gameId, e);
+    saves.clear(gameId);
+    toast(p, 'That save could not be loaded, so it was discarded.');
+    broadcast();
+  }
+}
+
+// ---------------------------------------------------------------- game loop
+
+function autosave() {
+  if (!session || session.mode !== 'server' || session.over) return;
+  saves.save(session.gameId, {
+    gameId: session.gameId,
+    options: session.options,
+    seats: session.seats.map(s => ({ name: s.name, bot: s.bot })),
+    state: session.game.state,
+  });
+}
+
+function pump() {
+  if (!session || session.mode !== 'server') return;
+  const g = session.game;
+  const over = g.over();
+  if (over) {
+    session.over = over;
+    phase = 'gameover';
+    saves.clear(session.gameId);
+    for (const t of session.botTimers.values()) clearTimeout(t);
+    session.botTimers.clear();
+    return;
+  }
+  autosave();
+  scheduleBots();
+}
+
+function scheduleBots() {
+  const g = session.game;
+  for (const seatIdx of g.awaiting()) {
+    const seat = session.seats[seatIdx];
+    if (!seat || !seat.bot || session.botTimers.has(seatIdx)) continue;
+    const delay = 650 + Math.random() * 850;
+    session.botTimers.set(seatIdx, setTimeout(() => {
+      if (!session || session.game !== g) return;
+      session.botTimers.delete(seatIdx);
+      if (!g.awaiting().includes(seatIdx)) return;
+      try {
+        const action = g.botAct(seatIdx);
+        if (action) {
+          const res = g.act(seatIdx, action);
+          if (res?.err) console.error(`bot illegal move in ${session.gameId}:`, res.err, action);
+        }
+      } catch (e) {
+        console.error(`bot crashed in ${session.gameId}:`, e);
+      }
+      pump();
+      broadcast();
+    }, delay));
+  }
+}
+
+// ---------------------------------------------------------------- messages
+
+function onPlayerMsg(p, m) {
+  switch (m.t) {
+    case 'setName': {
+      p.name = uniqueName(m.name, p.id);
+      broadcast(); break;
+    }
+    case 'openLobby': openLobby(p, m.gameId); break;
+    case 'joinLobby': {
+      if (phase !== 'lobby' || lobby.humans.includes(p.id)) break;
+      const meta = byId(lobby.gameId).meta;
+      if (lobbySize() >= meta.maxPlayers) {
+        if (lobby.bots.length) lobby.bots.pop(); // humans displace bots
+        else { toast(p, 'This table is full.'); break; }
+      }
+      lobby.humans.push(p.id);
+      broadcast(); break;
+    }
+    case 'leaveLobby': {
+      if (phase !== 'lobby') break;
+      lobby.humans = lobby.humans.filter(x => x !== p.id);
+      if (!lobby.humans.length) { returnToHub(); break; }
+      if (lobby.hostPid === p.id) lobby.hostPid = lobby.humans[0];
+      broadcast(); break;
+    }
+    case 'addBot': {
+      if (phase !== 'lobby' || p.id !== lobby.hostPid) break;
+      const meta = byId(lobby.gameId).meta;
+      if (lobbySize() < meta.maxPlayers) {
+        lobby.bots.push(botName([...lobby.bots, ...lobby.humans.map(h => players.get(h)?.name)]));
+      }
+      broadcast(); break;
+    }
+    case 'removeBot': {
+      if (phase !== 'lobby' || p.id !== lobby.hostPid) break;
+      lobby.bots.splice(m.i, 1);
+      broadcast(); break;
+    }
+    case 'setOption': {
+      if (phase !== 'lobby' || p.id !== lobby.hostPid) break;
+      const def = (byId(lobby.gameId).meta.options || []).find(o => o.key === m.key);
+      if (def && def.choices.some(c => String(c.v) === String(m.value))) {
+        lobby.options[m.key] = def.choices.find(c => String(c.v) === String(m.value)).v;
+      }
+      broadcast(); break;
+    }
+    case 'cancelLobby': {
+      if (phase === 'lobby' && p.id === lobby.hostPid) returnToHub();
+      break;
+    }
+    case 'start': {
+      if (phase !== 'lobby' || p.id !== lobby.hostPid) break;
+      startGame(); break;
+    }
+    case 'resumeGame': resumeGame(p, m.gameId); break;
+    case 'deleteSave': {
+      if (phase === 'hub') { saves.clear(m.gameId); broadcast(); }
+      break;
+    }
+    case 'act': {
+      if (phase !== 'game' || !session || session.mode !== 'server') break;
+      const seatIdx = session.seats.findIndex(s => s.pid === p.id && !s.bot);
+      if (seatIdx < 0) break;
+      const res = session.game.act(seatIdx, m.a);
+      if (res?.err) { send(p.ws, { t: 'nope', text: res.err }); break; }
+      pump();
+      broadcast(); break;
+    }
+    case 'input': { // real-time arcade controls -> forwarded to the TV sim
+      if (phase !== 'game' || !session || session.mode !== 'relay') break;
+      const seatIdx = session.seats.findIndex(s => s.pid === p.id && !s.bot);
+      if (seatIdx < 0) break;
+      for (const ws of tvSockets) send(ws, { t: 'input', seat: seatIdx, d: m.d });
+      break;
+    }
+    case 'takeover': {
+      if (phase !== 'game' || !session) break;
+      const seat = session.seats[m.seat];
+      const already = session.seats.some(s => s.pid === p.id && !s.bot);
+      if (!seat || !seat.bot || already) break;
+      clearTimeout(session.botTimers.get(m.seat));
+      session.botTimers.delete(m.seat);
+      session.seats[m.seat] = { name: p.name, bot: false, pid: p.id };
+      toast('all', `${p.name} took over for ${seat.name}`);
+      if (session.mode === 'server') pump();
+      broadcast(); break;
+    }
+    case 'botify': {
+      if (phase !== 'game' || !session || p.id !== hostPid()) break;
+      const seat = session.seats[m.seat];
+      if (!seat || seat.bot || seat.pid === p.id) break;
+      if (seat.pid && players.get(seat.pid)?.connected) break; // only for dropped players
+      session.seats[m.seat] = { name: seat.name, bot: true, pid: null };
+      toast('all', `A bot is filling in for ${seat.name}`);
+      if (session.mode === 'server') pump();
+      broadcast(); break;
+    }
+    case 'quitGame': {
+      if ((phase !== 'game' && phase !== 'gameover') || !session) break;
+      if (p.id !== hostPid() && phase === 'game') break;
+      if (phase === 'game' && session.mode === 'server') autosave(); // resumable later
+      returnToHub(); break;
+    }
+    case 'backToHub': {
+      if (phase === 'gameover') returnToHub();
+      break;
+    }
+    case 'checkUpdate':
+      updater.check().then(() => broadcast()).catch(() => broadcast());
+      break;
+    case 'applyUpdate':
+      if (updater.status.updateAvailable) {
+        toast('all', 'Updating Party Station… back in a moment!');
+        broadcast();
+        updater.apply().catch(e => toast('all', 'Update failed: ' + e.message));
+      }
+      break;
+    case 'ping': send(p.ws, { t: 'pong' }); break;
+  }
+}
+
+function onTvMsg(ws, m) {
+  switch (m.t) {
+    case 'relayEnd': { // the TV sim finished an arcade game
+      if (phase !== 'game' || !session || session.mode !== 'relay') break;
+      session.over = m.result || { title: 'Game over' };
+      phase = 'gameover';
+      broadcast(); break;
+    }
+    case 'relayScore': { // lightweight score mirror for phones during arcade games
+      if (phase !== 'game' || !session || session.mode !== 'relay') break;
+      for (const p of players.values()) send(p.ws, { t: 'relayScore', d: m.d });
+      break;
+    }
+    case 'ping': send(ws, { t: 'pong' }); break;
+  }
+}
+
+// ---------------------------------------------------------------- wiring
+
+export function handleConnection(ws) {
+  let role = null;
+  ws.on('message', raw => {
+    let m;
+    try { m = JSON.parse(raw); } catch { return; }
+    if (!role) {
+      if (m.t !== 'hello') return;
+      role = m.role === 'tv' ? 'tv' : 'player';
+      if (role === 'tv') {
+        tvSockets.add(ws);
+        send(ws, syncFor(null, true));
+      } else {
+        const p = attachPlayer(ws, m);
+        send(ws, syncFor(p, false));
+      }
+      broadcast();
+      return;
+    }
+    if (role === 'tv') onTvMsg(ws, m);
+    else {
+      const p = players.get(ws._pid);
+      if (p) onPlayerMsg(p, m);
+    }
+  });
+  ws.on('close', () => {
+    if (role === 'tv') {
+      tvSockets.delete(ws);
+      // A relay game cannot outlive its screen.
+      if (phase === 'game' && session?.mode === 'relay' && tvSockets.size === 0) {
+        toast('all', 'The big screen disconnected — arcade game ended.');
+        returnToHub();
+        return;
+      }
+    } else if (ws._pid) {
+      const p = players.get(ws._pid);
+      if (p && p.ws === ws) { p.connected = false; p.ws = null; }
+      if (phase === 'lobby' && lobby) {
+        lobby.humans = lobby.humans.filter(pid => players.get(pid)?.connected);
+        if (!lobby.humans.length) { returnToHub(); return; }
+        if (!players.get(lobby.hostPid)?.connected) lobby.hostPid = lobby.humans[0];
+      }
+      // Drop fully-departed players that aren't part of a running game.
+      if (phase === 'hub') players.delete(ws._pid);
+    }
+    broadcast();
+  });
+}
+
+export function isIdle() { return phase === 'hub'; }
+export { broadcast as notifyClients };

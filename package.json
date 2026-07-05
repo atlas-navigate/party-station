@@ -1,0 +1,20 @@
+{
+  "name": "party-station",
+  "version": "1.0.0",
+  "description": "Local party game station: card, board, and arcade games hosted on a Raspberry Pi. Players join from their phones at http://party-station.local",
+  "type": "module",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "simulate": "node scripts/simulate.js",
+    "e2e": "node scripts/e2e.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "ws": "^8.18.0"
+  },
+  "license": "MIT"
+}
