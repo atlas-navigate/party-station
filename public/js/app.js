@@ -28,7 +28,7 @@ async function loadModule(id) {
 }
 
 function catName(c) {
-  return { cards: 'Card Games', board: 'Board Games', arcade: 'Arcade' }[c] || c;
+  return { cards: 'Card Games', board: 'Board Games', arcade: 'Arcade', cabinet: '🕹️ Cabinet' }[c] || c;
 }
 
 // ---------------------------------------------------------------- screens
@@ -62,7 +62,9 @@ function wordmark() {
 }
 
 function hubScreen() {
-  const cat = localStorage.getItem('ps-cat') || 'cards';
+  const cats = ['cards', 'board', 'arcade', ...(sync.emu?.available ? ['cabinet'] : [])];
+  let cat = localStorage.getItem('ps-cat') || 'cards';
+  if (!cats.includes(cat)) cat = 'cards';
   const games = sync.games.filter(g => g.category === cat);
   return h('div', { class: 'screen' },
     h('div', { class: 'topbar' },
@@ -74,24 +76,72 @@ function hubScreen() {
     ),
     sync.tvCount === 0 && h('div', { class: 'banner', style: 'margin-bottom:12px;font-size:13px;' },
       '📺 No big screen yet — open ', h('b', {}, location.host + '/tv'), ' on the TV for the full experience.'),
-    h('div', { class: 'cat-tabs' }, ['cards', 'board', 'arcade'].map(c =>
+    h('div', { class: 'cat-tabs' }, cats.map(c =>
       h('button', {
-        class: 'tok' + (c === cat ? ' on-' + c : ''),
+        class: 'tok' + (c === cat ? ' on-' + (c === 'cabinet' ? 'arcade' : c) : ''),
+        style: cats.length > 3 ? 'font-size:12px;padding:10px 2px' : '',
         onclick: () => { localStorage.setItem('ps-cat', c); render(); },
       }, catName(c)))),
-    h('div', { class: 'game-grid' }, games.map(g => {
-      const save = sync.saves[g.id];
-      return h('button', { class: `game-tile cat-${g.category}`, onclick: () => gameSheet(g, save) },
-        save && h('span', { class: 'g-save' }, 'SAVED'),
-        h('span', { class: 'g-icon' }, g.icon),
-        h('span', { class: 'g-name' }, g.name),
-        h('span', { class: 'g-sub' }, `${g.minPlayers === g.maxPlayers ? g.minPlayers : g.minPlayers + '–' + g.maxPlayers} players`),
-        h('span', { class: 'g-sub' }, g.tagline),
-      );
-    })),
+    cat === 'cabinet'
+      ? cabinetGrid()
+      : h('div', { class: 'game-grid' }, games.map(g => {
+        const save = sync.saves[g.id];
+        return h('button', { class: `game-tile cat-${g.category}`, onclick: () => gameSheet(g, save) },
+          save && h('span', { class: 'g-save' }, 'SAVED'),
+          h('span', { class: 'g-icon' }, g.icon),
+          h('span', { class: 'g-name' }, g.name),
+          h('span', { class: 'g-sub' }, `${g.minPlayers === g.maxPlayers ? g.minPlayers : g.minPlayers + '–' + g.maxPlayers} players`),
+          h('span', { class: 'g-sub' }, g.tagline),
+        );
+      })),
     h('div', { class: 'divider' }),
     h('div', { class: 'eyebrow', style: 'margin-bottom:8px' }, `Here now (${sync.players.length})`),
     h('div', { class: 'row wrap' }, sync.players.map(p => chipEl(p))),
+  );
+}
+
+function cabinetGrid() {
+  return h('div', { class: 'stack' },
+    (sync.emu?.systems || []).map(s => h('div', {},
+      h('div', { class: 'eyebrow', style: 'margin:6px 0 8px' }, `${s.icon} ${s.name}`),
+      h('div', { class: 'game-grid' }, s.games.map(g =>
+        h('button', {
+          class: 'game-tile cat-arcade', style: 'min-height:0',
+          onclick: () => {
+            const sheet2 = sheet(`${s.icon} ${g.title}`,
+              h('p', { class: 'dim', style: 'margin-bottom:14px' },
+                `Launches in the emulator on the TV. Exit there (Select+Start) to come back to Party Station.`),
+              h('button', {
+                class: 'tok primary big',
+                onclick: () => { net.send({ t: 'emuLaunch', system: s.id, file: g.file }); sheet2.remove(); },
+              }, '▶ Play on the big screen'));
+          },
+        },
+          h('span', { class: 'g-icon', style: 'font-size:24px' }, s.icon),
+          h('span', { class: 'g-name', style: 'font-size:14px' }, g.title)))),
+    )),
+    h('p', { class: 'dim', style: 'font-size:12px;margin-top:10px' },
+      'Add ROMs of games you own to ~/RetroPie/roms/<system> on the Pi — they show up here within a minute.'),
+  );
+}
+
+function emulatorScreen() {
+  const e = sync.emulator;
+  return h('div', { class: 'screen stack center', style: 'padding-top:22vh' },
+    h('div', { style: 'font-size:64px' }, e.icon || '🕹️'),
+    h('h1', {}, e.title),
+    h('p', { class: 'dim' }, `Running in the ${e.system} emulator on the big screen.`),
+    h('p', { class: 'dim', style: 'font-size:13px' }, 'Exit in the emulator (Select+Start) to return to Party Station.'),
+    h('div', { class: 'actionbar' },
+      h('button', {
+        class: 'tok danger', onclick: () => {
+          const s = sheet('Force-quit the emulator?',
+            h('p', { class: 'dim', style: 'margin-bottom:12px' }, 'Unsaved emulator progress will be lost.'),
+            h('div', { class: 'row' },
+              h('button', { class: 'tok ghost grow', onclick: () => s.remove() }, 'Never mind'),
+              h('button', { class: 'tok danger grow', onclick: () => { net.send({ t: 'emuKill' }); s.remove(); } }, 'Force quit')));
+        },
+      }, '⛔ Force quit')),
   );
 }
 
@@ -312,6 +362,7 @@ function render() {
   if (!sync) return;
   if (!localStorage.getItem('ps-named')) { mount(root, joinScreen()); return; }
   document.body.style.overflow = padActive ? 'hidden' : '';
+  if (sync.emulator) { mount(root, emulatorScreen()); return; }
   switch (sync.phase) {
     case 'hub': mount(root, hubScreen()); break;
     case 'lobby': mount(root, lobbyScreen()); break;

@@ -10,6 +10,7 @@ import crypto from 'crypto';
 import { byId, catalog } from './registry.js';
 import * as saves from './saves.js';
 import * as updater from './updater.js';
+import * as emulator from './emulator.js';
 import { botName } from './bots.js';
 
 const players = new Map();   // pid -> {id, name, token, ws, connected}
@@ -56,6 +57,8 @@ function sharedState() {
     version: updater.status.version,
     updateAvailable: updater.status.updateAvailable,
     updating: updater.status.updating,
+    emu: emulator.summary(),
+    emulator: emulator.publicState(),
   };
 }
 
@@ -189,6 +192,7 @@ function returnToHub() {
 function openLobby(p, gameId) {
   const mod = byId(gameId);
   if (!mod || phase !== 'hub') return;
+  if (emulator.publicState()) { toast(p, 'Finish the arcade cabinet game first!'); return; }
   const options = {};
   for (const o of mod.meta.options || []) options[o.key] = o.def;
   lobby = { gameId, hostPid: p.id, humans: [p.id], bots: [], options };
@@ -367,7 +371,22 @@ function onPlayerMsg(p, m) {
       if (phase !== 'lobby' || p.id !== lobby.hostPid) break;
       startGame(); break;
     }
-    case 'resumeGame': resumeGame(p, m.gameId); break;
+    case 'resumeGame':
+      if (emulator.publicState()) { toast(p, 'Finish the arcade cabinet game first!'); break; }
+      resumeGame(p, m.gameId); break;
+    case 'emuLaunch': {
+      if (phase !== 'hub') { toast(p, 'Head back to the hub first.'); break; }
+      const res = emulator.launch(m.system, m.file, () => broadcast());
+      if (res.err) toast(p, res.err);
+      else toast('all', `🕹️ ${emulator.publicState()?.title} is starting on the big screen…`);
+      broadcast(); break;
+    }
+    case 'emuKill':
+      emulator.kill();
+      break;
+    case 'emuRescan':
+      emulator.scan(true);
+      broadcast(); break;
     case 'deleteSave': {
       if (phase === 'hub') { saves.clear(m.gameId); broadcast(); }
       break;

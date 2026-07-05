@@ -143,6 +143,24 @@ bob.send({ t: 'deleteSave', gameId: 'hearts' });
 bob.send({ t: 'deleteSave', gameId: 'candydash' });
 ok('cleanup done');
 
+// Cabinet (RetroArch) flow — runs only when the server sees an emulator
+// setup (real, or the fake one the test harness fabricates via env vars).
+if (alice.sync.emu?.available) {
+  const sys = alice.sync.emu.systems[0];
+  alice.send({ t: 'emuLaunch', system: sys.id, file: sys.games[0].file });
+  await waitFor(alice, s => !!s.emulator);
+  ok(`emulator launched: ${alice.sync.emulator.title}`);
+  alice.send({ t: 'openLobby', gameId: 'hearts' });
+  await sleep(300);
+  if (alice.sync.phase !== 'hub' || !alice.sync.emulator) throw new Error('lobby opened during emulator!');
+  ok('game launches blocked while the cabinet is running');
+  alice.send({ t: 'emuKill' });
+  await waitFor(alice, s => !s.emulator);
+  ok('emulator force-quit returns control to the hub');
+} else {
+  console.log('· cabinet checks skipped (no emulator configured)');
+}
+
 console.log(`\nAll ${passed} e2e checks passed.`);
 clearTimeout(deadline);
 process.exit(0);

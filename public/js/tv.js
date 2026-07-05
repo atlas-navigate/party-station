@@ -50,6 +50,7 @@ function myPadInfo(pad) { return sync?.pads?.[pad]; }
 
 function handlePad(pad, btn, isRepeat) {
   if (!sync) return;
+  if (sync.emulator) return; // RetroArch owns the controllers right now
   if (!myPadInfo(pad)) {
     if (!isRepeat) net.send({ t: 'padHello', pad, name: `P${pad + 1} 🎮` });
     return;
@@ -63,7 +64,15 @@ function handlePad(pad, btn, isRepeat) {
   }
 }
 
-function hubList() { return sync.games; }
+function hubList() {
+  const ents = sync.games.map(g => ({ kind: 'game', g }));
+  for (const s of (sync.emu?.systems || [])) {
+    for (const gm of s.games) {
+      ents.push({ kind: 'emu', system: s.id, sysName: s.name, icon: s.icon, file: gm.file, title: gm.title });
+    }
+  }
+  return ents;
+}
 
 function padHub(pad, btn) {
   const list = hubList();
@@ -72,13 +81,13 @@ function padHub(pad, btn) {
   if (btn === 'right') hubCursor = Math.min(list.length - 1, hubCursor + 1);
   if (btn === 'up') hubCursor = Math.max(0, hubCursor - cols);
   if (btn === 'down') hubCursor = Math.min(list.length - 1, hubCursor + cols);
-  if (btn === 'a' || btn === 'start') {
-    const g = list[hubCursor];
-    if (g) padMsg(pad, { t: 'openLobby', gameId: g.id });
+  const ent = list[hubCursor];
+  if ((btn === 'a' || btn === 'start') && ent) {
+    if (ent.kind === 'game') padMsg(pad, { t: 'openLobby', gameId: ent.g.id });
+    else padMsg(pad, { t: 'emuLaunch', system: ent.system, file: ent.file });
   }
-  if (btn === 'x') {
-    const g = list[hubCursor];
-    if (g && sync.saves[g.id]) padMsg(pad, { t: 'resumeGame', gameId: g.id });
+  if (btn === 'x' && ent?.kind === 'game' && sync.saves[ent.g.id]) {
+    padMsg(pad, { t: 'resumeGame', gameId: ent.g.id });
   }
   render();
 }
@@ -214,16 +223,15 @@ function hubScreen() {
   disposeScene();
   const list = hubList();
   const cats = [['cards', 'CARD GAMES'], ['board', 'BOARD GAMES'], ['arcade', 'ARCADE']];
-  let idx = 0;
   return h('div', { class: 'tv-stage' },
     h('div', { class: 'tv-top' }, wordmark(44), urlBox()),
     h('div', { style: 'flex:1;overflow:hidden' },
-      cats.map(([c, label]) => h('div', { style: 'margin-bottom:20px' },
+      cats.map(([c, label]) => h('div', { style: 'margin-bottom:16px' },
         h('div', { class: 'eyebrow', style: 'font-size:14px;margin-bottom:8px' }, label),
         h('div', { class: 'row wrap', style: 'gap:10px' },
-          list.filter(g => g.category === c).map(g => {
-            const i = list.indexOf(g);
-            const focused = i === hubCursor;
+          list.filter(e => e.kind === 'game' && e.g.category === c).map(e => {
+            const g = e.g;
+            const focused = list.indexOf(e) === hubCursor;
             return h('div', {
               class: `game-tile cat-${c}` + (focused ? ' tv-focus' : ''),
               style: 'min-height:0;padding:10px 14px;flex-direction:row;align-items:center;gap:10px;cursor:default',
@@ -233,6 +241,20 @@ function hubScreen() {
                 h('div', { class: 'g-name', style: 'font-size:16px' }, g.name, sync.saves[g.id] ? ' 💾' : ''),
                 h('div', { class: 'g-sub' }, `${g.minPlayers === g.maxPlayers ? g.minPlayers : g.minPlayers + '–' + g.maxPlayers} players`)));
           })))),
+      sync.emu?.available && h('div', { style: 'margin-bottom:14px' },
+        h('div', { class: 'eyebrow', style: 'font-size:14px;margin-bottom:8px' }, '🕹️ CABINET (RETROARCH)'),
+        h('div', { class: 'row wrap', style: 'gap:10px' },
+          list.filter(e => e.kind === 'emu').map(e => {
+            const focused = list.indexOf(e) === hubCursor;
+            return h('div', {
+              class: 'game-tile cat-arcade' + (focused ? ' tv-focus' : ''),
+              style: 'min-height:0;padding:8px 14px;flex-direction:row;align-items:center;gap:10px;cursor:default',
+            },
+              h('span', { style: 'font-size:22px' }, e.icon),
+              h('div', {},
+                h('div', { class: 'g-name', style: 'font-size:15px' }, e.title),
+                h('div', { class: 'g-sub' }, e.sysName)));
+          }))),
     ),
     h('div', { class: 'tv-seats', style: 'margin:6px 0' },
       sync.players.length
@@ -373,8 +395,24 @@ function gameoverScreen() {
   );
 }
 
+function emulatorScreen() {
+  disposeScene();
+  const e = sync.emulator;
+  return h('div', { class: 'tv-stage' },
+    h('div', { class: 'tv-top' }, wordmark(34), urlBox()),
+    h('div', { class: 'tv-main' },
+      h('div', { class: 'center' },
+        h('div', { style: 'font-size:100px' }, e.icon || '🕹️'),
+        h('div', { class: 'tv-big', style: 'font-size:54px' }, e.title),
+        h('p', { class: 'dim', style: 'font-size:22px;margin-top:12px' },
+          `${e.system} — the emulator is taking over this screen…`),
+        h('p', { class: 'dim', style: 'font-size:18px' }, 'Exit with Select+Start to come back to Party Station.'))),
+  );
+}
+
 function render() {
   if (!sync) return;
+  if (sync.emulator) { menus.clear(); mount(root, emulatorScreen()); return; }
   if (sync.phase === 'game') refreshMenus(); else menus.clear();
   switch (sync.phase) {
     case 'hub': mount(root, hubScreen()); break;

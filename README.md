@@ -90,6 +90,44 @@ Android phones resolve `.local` names in modern versions; if a device can't,
 use the Pi's IP address (shown in the app's Settings sheet and in
 `journalctl -u party-station`).
 
+## The Cabinet: real retro games via RetroPie
+
+Party Station can act as the frontend for RetroArch, so genuine classics
+(the games you actually meant — NBA Jam, Mortal Kombat II, …) run on the
+same console. Setup on the Pi:
+
+```bash
+sudo apt install -y git dialog unzip
+cd ~ && git clone --depth=1 https://github.com/RetroPie/RetroPie-Setup.git
+cd RetroPie-Setup && sudo ./retropie_setup.sh
+```
+
+In the menu: **Manage packages → Manage core packages → install `retroarch`**,
+then under *Manage main packages* install the cores you want:
+`lr-mame2003-plus` (arcade), `lr-snes9x`, `lr-genesis-plus-gx`,
+`lr-pcsx-rearmed` (PS1), `lr-fceumm` (NES). Skip EmulationStation —
+Party Station is the frontend.
+
+Then drop ROM files for **games you legally own** into the standard folders:
+
+```
+~/RetroPie/roms/arcade/     (.zip — must match the mame2003-plus ROM set!)
+~/RetroPie/roms/snes/       (.sfc/.smc)
+~/RetroPie/roms/psx/        (.cue/.chd/.pbp)
+~/RetroPie/roms/megadrive/  (.md/.gen/.bin)
+```
+
+Within a minute a **🕹️ Cabinet** category appears in the hub (phones and
+TV). Launching a title starts RetroArch fullscreen on the Pi's HDMI output;
+Bluetooth controllers work in it natively (that's their home turf). Exit
+with **Select+Start** and Party Station takes the screen back — phones also
+get a force-quit button just in case. No ROMs ship with this repo, and none
+ever will.
+
+Per-title honesty for a Pi 4: NBA Jam and MK2 run full speed under
+`lr-mame2003-plus`; NFL Blitz's 3dfx arcade board is NOT playable under MAME
+on a Pi — use the PS1 port with `lr-pcsx-rearmed` instead.
+
 ## Deploying updates
 
 The station updates itself from this repo:
