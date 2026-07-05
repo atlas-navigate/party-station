@@ -1,5 +1,8 @@
-// Combat Legends — 1v1 arcade fighter. Simulation runs on the TV; phones are
-// gamepads. Best of 3 rounds, 60 seconds each.
+// Combat Legends — 1v1 arcade fighter in 3D. Simulation runs on the TV;
+// phones stream inputs, Bluetooth pads are polled locally. Best of 3.
+import { createScene, THREE } from '../three-app/scene.js';
+import { makeLabel } from '../three-app/assets.js';
+
 export const player = {
   pad: {
     dpad: ['left', 'right', 'up'],
@@ -7,34 +10,108 @@ export const player = {
   },
 };
 
-const W = 960, H = 540, FLOOR = 440, GRAV = 0.8;
+const W = 960, FLOOR = 440, GRAV = 0.8;
 const ATTACKS = {
-  p: { range: 74, dmg: 6, startup: 6, active: 5, recover: 10, label: 'punch' },
-  k: { range: 100, dmg: 11, startup: 13, active: 6, recover: 20, label: 'kick' },
+  p: { range: 74, dmg: 6, startup: 6, active: 5, recover: 10 },
+  k: { range: 100, dmg: 11, startup: 13, active: 6, recover: 20 },
 };
-const COLORS = [['#ffb52e', '#c47f0e'], ['#b78bff', '#7a51c2']];
+const F_HEX = [[0xffb52e, 0xc47f0e], [0xb78bff, 0x7a51c2]];
+const F_CSS = ['#ffb52e', '#b78bff'];
+
+const w2x = x => (x - W / 2) / 84;
+const w2y = y => Math.max(0, (FLOOR - y) / 84);
+
+function makeFighterMesh(sc, i) {
+  const [c1, c2] = F_HEX[i];
+  const g = new THREE.Group();
+  const mats = { main: new THREE.MeshLambertMaterial({ color: c1 }), dark: new THREE.MeshLambertMaterial({ color: c2 }) };
+  const hips = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.3, 0.3), mats.dark);
+  hips.position.y = 0.75;
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.62, 0.34), mats.main);
+  torso.position.y = 1.24;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.2, 12, 10),
+    new THREE.MeshLambertMaterial({ color: 0xd9a066 }));
+  head.position.y = 1.78;
+  const band = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.07, 0.42), mats.dark);
+  band.position.y = 1.84;
+  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.62, 0.2), mats.dark);
+  legL.position.set(0, 0.31, 0.12);
+  const legR = legL.clone();
+  legR.position.z = -0.12;
+  const armF = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.14, 0.14), mats.main); // front arm (attacks)
+  armF.geometry.translate(0.25, 0, 0);
+  armF.position.set(0.2, 1.32, 0.16);
+  const armB = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.14, 0.14), mats.main);
+  armB.geometry.translate(0.2, 0, 0);
+  armB.position.set(0.14, 1.28, -0.18);
+  const legKick = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.16, 0.16), mats.dark);
+  legKick.geometry.translate(0.33, 0, 0);
+  legKick.position.set(0.1, 0.7, 0.06);
+  legKick.visible = false;
+  const shield = new THREE.Mesh(new THREE.SphereGeometry(0.55, 12, 10),
+    new THREE.MeshLambertMaterial({ color: 0x3ecf8e, transparent: true, opacity: 0.3 }));
+  shield.position.y = 1.2;
+  shield.visible = false;
+  g.add(hips, torso, head, band, legL, legR, armF, armB, legKick, shield);
+  g.userData = { armF, legKick, shield, legL, legR };
+  sc.scene.add(g);
+  return g;
+}
 
 export const tv = {
   start(holder, ctx) {
-    const canvas = document.createElement('canvas');
-    canvas.width = W; canvas.height = H;
-    canvas.className = 'arcade';
-    canvas.style.cssText = 'max-width:100%;max-height:100%;';
-    holder.innerHTML = '';
-    holder.appendChild(canvas);
-    const g = canvas.getContext('2d');
+    const sc = createScene(holder, {
+      camPos: [0, 3.1, 9.6], lookAt: [0, 1.6, 0], fov: 40, continuous: true, bg: 0x171224,
+    });
+    // Dojo arena.
+    const mat = new THREE.Mesh(new THREE.BoxGeometry(12.4, 0.22, 4.6),
+      new THREE.MeshLambertMaterial({ color: 0x5c3a4e }));
+    mat.position.y = -0.11;
+    sc.scene.add(mat);
+    const matTop = new THREE.Mesh(new THREE.BoxGeometry(11.6, 0.05, 4.0),
+      new THREE.MeshLambertMaterial({ color: 0x6e4a60 }));
+    matTop.position.y = 0.03;
+    sc.scene.add(matTop);
+    for (let x = -5.6; x <= 5.6; x += 1.6) { // paper-screen back wall
+      const panel = new THREE.Mesh(new THREE.BoxGeometry(1.4, 3.4, 0.08),
+        new THREE.MeshLambertMaterial({ color: 0x2a2036 }));
+      panel.position.set(x, 1.8, -2.9);
+      sc.scene.add(panel);
+      const paper = new THREE.Mesh(new THREE.BoxGeometry(1.1, 3.0, 0.04),
+        new THREE.MeshLambertMaterial({ color: 0x4a3c5c }));
+      paper.position.set(x, 1.8, -2.86);
+      sc.scene.add(paper);
+    }
+    for (const dx of [-6.4, 6.4]) {
+      const lantern = new THREE.Mesh(new THREE.SphereGeometry(0.35, 10, 8),
+        new THREE.MeshLambertMaterial({ color: 0xff9445, emissive: 0x552200 }));
+      lantern.position.set(dx, 3.0, -1.5);
+      sc.scene.add(lantern);
+    }
 
     const names = [
       ctx.seats[0] ? ctx.seats[0].name : 'Vector',
       ctx.seats[1] ? ctx.seats[1].name : 'Vector',
     ];
     const isCpu = [!ctx.seats[0] || ctx.seats[0].bot, !ctx.seats[1] || ctx.seats[1].bot];
+    const meshes = [makeFighterMesh(sc, 0), makeFighterMesh(sc, 1)];
     const keys = [{}, {}];
     const wins = [0, 0];
     let round = 1, roundClock = 0, phase = 'intro', phaseTtl = 120;
     let projectiles = [];
-    let raf = null, ended = false;
+    const projMeshes = new Map();
+    let ended = false;
+    let koText = '', koWinner = -1;
     let f = [];
+
+    const kk4 = i => {
+      const ws = keys[i] || {};
+      const pd = key => ctx.padDown && ctx.padDown(i, key);
+      return {
+        left: ws.left || pd('left'), right: ws.right || pd('right'), up: ws.up || pd('up'),
+        p: ws.p || pd('a'), k: ws.k || pd('x'), b: ws.b || pd('b'), s: ws.s || pd('y'),
+      };
+    };
 
     function resetRound() {
       f = [0, 1].map(i => ({
@@ -42,6 +119,8 @@ export const tv = {
         hp: 100, face: i === 0 ? 1 : -1,
         state: 'idle', t: 0, atk: null, cool: 0, special: 0, stun: 0,
       }));
+      for (const [, m] of projMeshes) sc.scene.remove(m);
+      projMeshes.clear();
       projectiles = [];
       roundClock = 60 * 60;
     }
@@ -66,7 +145,7 @@ export const tv = {
     }
 
     function stepFighter(me, foe) {
-      const kk = isCpu[me.i] ? cpuKeys(me, foe) : keys[me.i];
+      const kk = isCpu[me.i] ? cpuKeys(me, foe) : kk4(me.i);
       me.face = foe.x > me.x ? 1 : -1;
       if (me.cool > 0) me.cool--;
       if (me.special > 0) me.special--;
@@ -76,9 +155,8 @@ export const tv = {
         if (me.state === 'attack') {
           me.t++;
           const a = ATTACKS[me.atk];
-          if (me.t === a.startup + 1) { // active frame: check hit
-            const reach = me.x + me.face * a.range;
-            if (Math.abs(foe.x - reach) < 55 || (Math.abs(foe.x - me.x) < a.range && Math.abs(foe.y - me.y) < 60)) {
+          if (me.t === a.startup + 1) {
+            if (Math.abs(foe.x - me.x) < a.range + 40 && Math.abs(foe.y - me.y) < 70) {
               hurt(foe, a.dmg, me.face);
             }
           }
@@ -94,7 +172,7 @@ export const tv = {
               me.cool = 14;
             } else if (kk.s && me.special === 0) {
               me.special = 170;
-              projectiles.push({ x: me.x + me.face * 40, y: me.y - 62, vx: me.face * 9, owner: me.i, ttl: 130 });
+              projectiles.push({ id: Math.random(), x: me.x + me.face * 40, y: me.y - 62, vx: me.face * 9, owner: me.i, ttl: 130 });
             }
           }
         }
@@ -103,6 +181,24 @@ export const tv = {
       me.y = Math.min(FLOOR, me.y + me.vy);
       if (me.y === FLOOR) me.vy = 0;
       me.x = Math.max(50, Math.min(W - 50, me.x));
+    }
+
+    function nextRoundOrEnd() {
+      if (wins[0] === 2 || wins[1] === 2 || round === 3) {
+        if (!ended) {
+          ended = true;
+          const w = wins[0] === wins[1] ? -1 : wins[0] > wins[1] ? 0 : 1;
+          ctx.end({
+            title: w < 0 ? 'Double K.O. — a draw!' : `${names[w]} WINS! 🏆`,
+            lines: [`Rounds: ${names[0]} ${wins[0]} — ${wins[1]} ${names[1]}`],
+          });
+        }
+        return;
+      }
+      round++;
+      resetRound();
+      phase = 'intro';
+      phaseTtl = 110;
     }
 
     function step() {
@@ -135,125 +231,76 @@ export const tv = {
       }
     }
 
-    let koText = '', koWinner = -1;
-    function nextRoundOrEnd() {
-      if (wins[0] === 2 || wins[1] === 2 || round === 3) {
-        if (!ended) {
-          ended = true;
-          const w = wins[0] === wins[1] ? -1 : wins[0] > wins[1] ? 0 : 1;
-          ctx.end({
-            title: w < 0 ? 'Double K.O. — a draw!' : `${names[w]} WINS! 🏆`,
-            lines: [`Rounds: ${names[0]} ${wins[0]} — ${wins[1]} ${names[1]}`],
-          });
-        }
-        return;
-      }
-      round++;
-      resetRound();
-      phase = 'intro';
-      phaseTtl = 110;
+    const hudBars = document.createElement('div');
+    hudBars.style.cssText = 'position:absolute;left:0;right:0;top:10px;display:flex;justify-content:space-between;'
+      + 'padding:0 26px;gap:16px;align-items:center;';
+    const hudBanner = document.createElement('div');
+    hudBanner.style.cssText = 'position:absolute;left:50%;top:36%;transform:translate(-50%,-50%);font-weight:800;'
+      + 'font-size:64px;color:#ffb52e;text-shadow:0 4px 18px #000;display:none;';
+    sc.hud.append(hudBars, hudBanner);
+
+    function bar(i) {
+      const pct = f[i] ? f[i].hp : 100;
+      const dir = i === 0 ? 'right' : 'left';
+      return `<div style="flex:1;max-width:44%">
+        <div style="background:#10121fee;border-radius:9px;padding:3px">
+          <div style="height:16px;border-radius:7px;width:${pct}%;margin-${i === 0 ? 'left' : 'right'}:auto;
+            background:${pct > 30 ? F_CSS[i] : '#ff5d73'}"></div>
+        </div>
+        <div style="font-weight:800;font-size:15px;margin-top:3px;text-align:${dir === 'right' ? 'left' : 'right'};color:#f2efe4">
+          ${names[i]} ${'●'.repeat(wins[i])}</div>
+      </div>`;
     }
 
-    function drawFighter(me) {
-      const [c1, c2] = COLORS[me.i];
-      const x = me.x, y = me.y;
-      g.save();
-      if (me.state === 'hit') g.translate((Math.random() - .5) * 5, 0);
-      // legs
-      g.strokeStyle = c2; g.lineWidth = 10; g.lineCap = 'round';
-      const kick = me.state === 'attack' && me.atk === 'k' && me.t > ATTACKS.k.startup - 4;
-      g.beginPath(); g.moveTo(x, y - 52);
-      g.lineTo(x - 14, y); g.moveTo(x, y - 52);
-      if (kick) g.lineTo(x + me.face * 52, y - 60);
-      else g.lineTo(x + 14, y);
-      g.stroke();
-      // torso
-      g.fillStyle = c1;
-      g.fillRect(x - 17, y - 106, 34, 58);
-      // arms
-      g.strokeStyle = c1; g.lineWidth = 9;
-      const punch = me.state === 'attack' && me.atk === 'p' && me.t > ATTACKS.p.startup - 3;
-      g.beginPath();
-      g.moveTo(x, y - 95);
-      if (me.state === 'block') { g.lineTo(x + me.face * 22, y - 78); g.lineTo(x + me.face * 20, y - 104); }
-      else if (punch) g.lineTo(x + me.face * 62, y - 92);
-      else g.lineTo(x + me.face * 24, y - 70);
-      g.stroke();
-      // head
-      g.fillStyle = c2;
-      g.beginPath(); g.arc(x, y - 122, 15, 0, 7); g.fill();
-      g.fillStyle = '#10121f';
-      g.beginPath(); g.arc(x + me.face * 6, y - 124, 2.5, 0, 7); g.fill();
-      if (me.state === 'block') {
-        g.fillStyle = '#3ecf8e55';
-        g.beginPath(); g.arc(x + me.face * 26, y - 90, 26, 0, 7); g.fill();
-      }
-      g.restore();
-    }
-
-    function draw() {
-      // dojo backdrop
-      g.fillStyle = '#151726'; g.fillRect(0, 0, W, H);
-      g.fillStyle = '#1d2138';
-      g.fillRect(0, 90, W, 30); g.fillRect(0, 160, W, 14);
-      for (let x = 60; x < W; x += 180) { g.fillStyle = '#232741'; g.fillRect(x, 120, 26, 320); }
-      g.fillStyle = '#2b2136'; g.fillRect(0, FLOOR + 4, W, H - FLOOR);
-      g.fillStyle = '#3a2c49'; g.fillRect(0, FLOOR + 4, W, 8);
-
-      for (const pr of projectiles) {
-        g.fillStyle = '#7de3ff';
-        g.beginPath(); g.arc(pr.x, pr.y, 13 + Math.sin(Date.now() / 50) * 3, 0, 7); g.fill();
-        g.fillStyle = '#e0f8ff';
-        g.beginPath(); g.arc(pr.x, pr.y, 6, 0, 7); g.fill();
-      }
-      drawFighter(f[0]);
-      drawFighter(f[1]);
-
-      // HUD: health bars
+    function syncMeshes() {
       for (const i of [0, 1]) {
-        const x = i === 0 ? 40 : W - 40 - 360;
-        g.fillStyle = '#10121f'; g.fillRect(x, 28, 360, 26);
-        g.fillStyle = f[i].hp > 30 ? COLORS[i][0] : '#ff5d73';
-        const w2 = 356 * f[i].hp / 100;
-        g.fillRect(i === 0 ? x + 2 + (356 - w2) : x + 2, 30, w2, 22);
-        g.font = '800 15px system-ui';
-        g.textAlign = i === 0 ? 'left' : 'right';
-        g.fillStyle = '#f2efe4';
-        g.fillText(`${names[i]}  ${'●'.repeat(wins[i])}`, i === 0 ? x : x + 360, 74);
+        const me = f[i], m = meshes[i], U = m.userData;
+        m.position.set(w2x(me.x), w2y(me.y), 0);
+        m.rotation.y = me.face === 1 ? 0 : Math.PI;
+        const punching = me.state === 'attack' && me.atk === 'p' && me.t > ATTACKS.p.startup - 3;
+        const kicking = me.state === 'attack' && me.atk === 'k' && me.t > ATTACKS.k.startup - 4;
+        U.armF.rotation.z = punching ? 0 : -0.5;
+        U.armF.scale.x = punching ? 1.35 : 1;
+        U.legKick.visible = kicking;
+        U.legL.visible = U.legR.visible = !kicking;
+        U.shield.visible = me.state === 'block';
+        if (me.state === 'hit') m.position.x += (Math.random() - 0.5) * 0.08;
       }
-      g.font = '800 30px system-ui'; g.textAlign = 'center';
-      g.fillStyle = '#f2efe4';
-      g.fillText(Math.max(0, Math.ceil(roundClock / 60)), W / 2, 50);
-
-      if (phase === 'intro') {
-        g.font = '800 58px system-ui';
-        g.fillStyle = '#ffb52e';
-        g.fillText(phaseTtl > 50 ? `ROUND ${round}` : 'FIGHT!', W / 2, 260);
-      }
-      if (phase === 'ko') {
-        g.font = '800 72px system-ui';
-        g.fillStyle = '#ff5d73';
-        g.fillText(koText, W / 2, 250);
-        if (koWinner >= 0) {
-          g.font = '800 30px system-ui';
-          g.fillStyle = '#f2efe4';
-          g.fillText(`${names[koWinner]} takes round ${round}`, W / 2, 300);
+      const seen = new Set();
+      for (const pr of projectiles) {
+        seen.add(pr.id);
+        let m = projMeshes.get(pr.id);
+        if (!m) {
+          m = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 8),
+            new THREE.MeshLambertMaterial({ color: 0x7de3ff, emissive: 0x2a6a88 }));
+          projMeshes.set(pr.id, m);
+          sc.scene.add(m);
         }
+        m.position.set(w2x(pr.x), w2y(pr.y) + 0.2, 0.1);
+        m.scale.setScalar(1 + Math.sin(Date.now() / 60) * 0.15);
       }
+      for (const [id, m] of [...projMeshes]) {
+        if (!seen.has(id)) { sc.scene.remove(m); projMeshes.delete(id); }
+      }
+      const clock = `<div style="font-weight:800;font-size:30px;background:#10121fee;border-radius:12px;padding:6px 16px;color:#f2efe4">
+        ${Math.max(0, Math.ceil(roundClock / 60))}</div>`;
+      hudBars.innerHTML = bar(0) + clock + bar(1);
+      if (phase === 'intro') {
+        hudBanner.style.display = 'block';
+        hudBanner.textContent = phaseTtl > 50 ? `ROUND ${round}` : 'FIGHT!';
+      } else if (phase === 'ko') {
+        hudBanner.style.display = 'block';
+        hudBanner.textContent = koWinner >= 0 ? `${koText} ${names[koWinner]} takes round ${round}` : koText;
+      } else hudBanner.style.display = 'none';
     }
 
     resetRound();
-    function loop() {
-      if (ended) return;
-      step(); draw();
-      raf = requestAnimationFrame(loop);
-    }
-    raf = requestAnimationFrame(loop);
+    sc.onTick(() => { if (!ended) { step(); syncMeshes(); } });
 
     return {
       input(seat, d) { if (keys[seat]) keys[seat][d.k] = d.v; },
-      stop() { ended = true; cancelAnimationFrame(raf); },
-      rehome(newHolder) { newHolder.innerHTML = ''; newHolder.appendChild(canvas); },
+      stop() { ended = true; sc.dispose(); },
+      rehome: h2 => sc.rehome(h2),
     };
   },
 };

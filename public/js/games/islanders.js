@@ -1,10 +1,15 @@
 import { h, mount, sheet } from '../ui.js';
+import { createScene, THREE } from '../three-app/scene.js';
+import {
+  makeHouse, makeLabel, makeCursorRing, canvasTex, SEAT_COLORS as SEAT_HEX3D,
+} from '../three-app/assets.js';
 
 const TERRAIN = {
   wood: '#2e7d46', brick: '#c25b3f', wool: '#9fd47f', grain: '#e3b93e',
   ore: '#8b90a8', desert: '#d9c79a',
 };
 const RES_ICON = { wood: '🌲', brick: '🧱', wool: '🐑', grain: '🌾', ore: '🪨' };
+const RES = Object.keys(RES_ICON);
 const SEAT_COLORS = ['#ffb52e', '#ff5d73', '#3ecf8e', '#b78bff'];
 const NS = 'http://www.w3.org/2000/svg';
 
@@ -240,27 +245,272 @@ function tradeSheet(priv, send) {
   );
 }
 
+// 3D island: extruded terrain hexes, trees on forests, peaks on mountains,
+// wooden roads, little settlements that grow into cities, a skulking bandit.
+const T3D = {
+  wood: { color: 0x2e7d46, h: 0.34 }, brick: { color: 0xc2593c, h: 0.3 },
+  wool: { color: 0x9fd47f, h: 0.2 }, grain: { color: 0xe3b93e, h: 0.22 },
+  ore: { color: 0x8b90a8, h: 0.44 }, desert: { color: 0xd9c79a, h: 0.14 },
+};
+const S3 = 1.62;
+const DOTS3 = { 2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 8: 5, 9: 4, 10: 3, 11: 2, 12: 1 };
+
+function numTokenTex(num) {
+  const hot = num === 6 || num === 8;
+  return canvasTex('itok:' + num, 64, 64, g => {
+    g.fillStyle = '#f2ecd8'; g.beginPath(); g.arc(32, 32, 30, 0, 7); g.fill();
+    g.fillStyle = hot ? '#d22c47' : '#26231e';
+    g.font = '800 26px system-ui'; g.textAlign = 'center';
+    g.fillText(num, 32, 38);
+    for (let d = 0; d < (DOTS3[num] || 0); d++) {
+      g.beginPath(); g.arc(32 + (d - (DOTS3[num] - 1) / 2) * 9, 52, 2.6, 0, 7); g.fill();
+    }
+  });
+}
+
 export const tv = {
-  render(el, ctx) {
-    const { pub, seats } = ctx;
-    mount(el,
-      h('div', { style: 'display:flex;gap:24px;width:100%;height:100%;align-items:center;justify-content:center' },
-        h('div', { style: 'height:min(74vh,700px);flex:0 1 760px' }, boardSVG(pub, 60)),
-        h('div', { class: 'stack', style: 'min-width:270px' },
-          pub.dice && h('div', { class: 'banner center', style: 'font-size:26px' },
-            `🎲 ${pub.dice[0] + pub.dice[1]}`),
-          seats.map((s, i) => h('div', {
-            class: 'banner',
-            style: `border-left:6px solid ${SEAT_COLORS[i]};`
-              + (pub.turn === i ? 'box-shadow:0 4px 0 var(--marquee-edge),0 0 20px #ffb52e55;' : ''),
-          },
-            h('div', { class: 'spread' },
-              h('span', {}, `${s.bot ? '🤖 ' : ''}${s.name}`),
-              h('span', { class: 'numpill', style: 'background:var(--marquee);color:#241a02' }, `${pub.scores[i]} VP`)),
-            h('div', { class: 'dim', style: 'font-size:14px;margin-top:3px' },
-              `${pub.resCounts[i]} cards · roads ${pub.roadLens?.[i] ?? 0}${pub.lrHolder === i ? ' 🛤️👑' : ''}`),
-          )),
-          h('div', { class: 'log', style: 'font-size:15px' }, pub.log.slice(-4).map(l => h('div', {}, l))),
-        )));
+  mount(holder, ctx) {
+    const sc = createScene(holder, { camPos: [0, 10.8, 9.8], lookAt: [0, 0, -0.2], fov: 44 });
+    const B = ctx.pub.board;
+    const P = (x, y) => [x * S3, y * S3]; // board 2D -> world x/z
+
+    // Sea.
+    const sea = new THREE.Mesh(new THREE.CylinderGeometry(8.6, 8.6, 0.12, 40),
+      new THREE.MeshLambertMaterial({ color: 0x1c4f7a }));
+    sea.position.y = -0.09;
+    sc.scene.add(sea);
+
+    // Terrain hexes with scenery.
+    B.hexes.forEach(hex => {
+      const t = T3D[hex.res] || T3D.desert;
+      const [x, z] = P(hex.x, hex.y);
+      const m = new THREE.Mesh(new THREE.CylinderGeometry(0.565 * S3, 0.585 * S3, t.h, 6),
+        new THREE.MeshLambertMaterial({ color: t.color }));
+      m.position.set(x, t.h / 2, z);
+      m.rotation.y = Math.PI / 6;
+      sc.scene.add(m);
+      if (hex.res === 'wood') {
+        for (const [dx, dz] of [[-0.32, -0.1], [0.3, 0.22], [0.05, -0.38]]) {
+          const tr = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.4, 7),
+            new THREE.MeshLambertMaterial({ color: 0x1e5c34 }));
+          tr.position.set(x + dx, t.h + 0.2, z + dz);
+          sc.scene.add(tr);
+        }
+      }
+      if (hex.res === 'ore') {
+        const pk = new THREE.Mesh(new THREE.ConeGeometry(0.3, 0.5, 5),
+          new THREE.MeshLambertMaterial({ color: 0x6e7387 }));
+        pk.position.set(x + 0.1, t.h + 0.24, z);
+        sc.scene.add(pk);
+      }
+      if (hex.res === 'wool') {
+        for (const [dx, dz] of [[-0.25, 0.15], [0.3, -0.2]]) {
+          const sh = new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 6),
+            new THREE.MeshLambertMaterial({ color: 0xf5f2e8 }));
+          sh.position.set(x + dx, t.h + 0.08, z + dz);
+          sc.scene.add(sh);
+        }
+      }
+      if (hex.num) {
+        const tok = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.24, 0.05, 18),
+          [new THREE.MeshLambertMaterial({ color: 0xd8d2be }),
+            new THREE.MeshLambertMaterial({ map: numTokenTex(hex.num) }),
+            new THREE.MeshLambertMaterial({ color: 0xd8d2be })]);
+        tok.position.set(x, t.h + 0.03, z);
+        sc.scene.add(tok);
+      }
+    });
+
+    const dynamic = new THREE.Group();
+    sc.scene.add(dynamic);
+    const bandit = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.62, 8),
+      new THREE.MeshLambertMaterial({ color: 0x1a1a24 }));
+    sc.scene.add(bandit);
+    const focusRing = makeCursorRing(0xffb52e);
+    focusRing.visible = false;
+    sc.scene.add(focusRing);
+
+    const hudPanel = document.createElement('div');
+    hudPanel.style.cssText = 'position:absolute;right:14px;top:10px;display:flex;flex-direction:column;gap:8px;font-size:15px;min-width:230px;';
+    const hudLog = document.createElement('div');
+    hudLog.style.cssText = 'position:absolute;left:14px;bottom:10px;font-size:14px;color:#9aa0b8;line-height:1.6;max-width:32%;';
+    const hudTop = document.createElement('div');
+    hudTop.style.cssText = 'position:absolute;left:50%;top:8px;transform:translateX(-50%);font-weight:800;font-size:18px;'
+      + 'background:#10121fcc;padding:8px 18px;border-radius:12px;';
+    sc.hud.append(hudPanel, hudLog, hudTop);
+
+    function update(c) {
+      const pub = c.pub;
+      sc.clearGroup(dynamic);
+      for (const [ei, seat] of Object.entries(pub.roads)) {
+        const e = B.edges[ei];
+        const a = B.verts[e.a], b = B.verts[e.b];
+        const [ax, az] = P(a.x, a.y), [bx, bz] = P(b.x, b.y);
+        const len = Math.hypot(bx - ax, bz - az);
+        const road = new THREE.Mesh(new THREE.BoxGeometry(len * 0.72, 0.1, 0.13),
+          new THREE.MeshLambertMaterial({ color: SEAT_HEX3D[seat % 6] }));
+        road.position.set((ax + bx) / 2, 0.42, (az + bz) / 2);
+        road.rotation.y = -Math.atan2(bz - az, bx - ax);
+        dynamic.add(road);
+      }
+      for (const [vi, bld] of Object.entries(pub.builds)) {
+        const v = B.verts[vi];
+        const [x, z] = P(v.x, v.y);
+        const house = makeHouse(SEAT_HEX3D[bld.seat % 6], bld.city);
+        house.position.set(x, 0.4, z);
+        house.scale.setScalar(bld.city ? 1.5 : 1.15);
+        dynamic.add(house);
+      }
+      const bh = B.hexes[pub.bandit];
+      const [bx2, bz2] = P(bh.x, bh.y);
+      bandit.position.set(bx2 + 0.3, (T3D[bh.res] || T3D.desert).h + 0.3, bz2 + 0.3);
+
+      hudTop.textContent = pub.phase === 'setup'
+        ? `Setup — ${c.seats[pub.turn].name} places a ${pub.setupStage}`
+        : pub.step === 'discard' ? 'Rolled 7! Over-stocked players discard…'
+          : pub.step === 'bandit' ? `${c.seats[pub.turn].name} moves the bandit 🦹`
+            : pub.dice ? `🎲 ${pub.dice[0] + pub.dice[1]} — ${c.seats[pub.turn].name}'s turn`
+              : `${c.seats[pub.turn].name}'s turn`;
+      hudPanel.innerHTML = c.seats.map((s, i) => `
+        <div style="background:${pub.turn === i ? '#3a3145' : '#10121fcc'};border-radius:10px;padding:8px 12px;
+          border-left:5px solid ${SEAT_COLORS[i]}">
+          <b>${s.bot ? '🤖 ' : ''}${s.name}</b>
+          <span style="float:right;font-weight:800;color:#ffb52e">${pub.scores[i]} VP</span>
+          <div style="color:#9aa0b8;font-size:12px">${pub.resCounts[i]} cards · road ${pub.roadLens?.[i] ?? 0}${pub.lrHolder === i ? ' 👑' : ''}</div>
+        </div>`).join('');
+      hudLog.innerHTML = pub.log.slice(-4).map(l => `<div>${l}</div>`).join('');
+      sc.invalidate();
+    }
+
+    return {
+      update,
+      rehome: h2 => sc.rehome(h2),
+      dispose: () => sc.dispose(),
+      focus(seat, f) {
+        focusRing.visible = false;
+        if (f && typeof f === 'object') {
+          let x, z, y = 0.45;
+          if (f.v != null) { const v = B.verts[f.v]; [x, z] = P(v.x, v.y); }
+          else if (f.e != null) {
+            const e = B.edges[f.e];
+            [x, z] = P((B.verts[e.a].x + B.verts[e.b].x) / 2, (B.verts[e.a].y + B.verts[e.b].y) / 2);
+          } else if (f.hex != null) { const hx = B.hexes[f.hex]; [x, z] = P(hx.x, hx.y); y = 0.7; }
+          if (x !== undefined) {
+            focusRing.visible = true;
+            focusRing.position.set(x, y, z);
+          }
+        }
+        sc.invalidate();
+      },
+    };
   },
 };
+
+function vertLabel(pub, vi) {
+  const pips = pub.board.verts[vi].hexes.reduce((a, hi) => {
+    const hx = pub.board.hexes[hi];
+    return a + (DOTS3[hx.num] || 0);
+  }, 0);
+  return `Spot ${'⭐'.repeat(Math.max(1, Math.round(pips / 4)))} (${pips} pips)`;
+}
+
+export function padChoices({ pub, priv, seat, seats }, stage) {
+  if (priv.mustDiscard > 0) {
+    stage.give = stage.give || {};
+    const total = RES.reduce((a, k) => a + (stage.give[k] || 0), 0);
+    return {
+      title: `Discard ${total}/${priv.mustDiscard}`, sticky: true,
+      items: [
+        ...RES.filter(k => (priv.res[k] || 0) > 0).map(k => ({
+          label: `${RES_ICON[k]} ${stage.give[k] || 0}/${priv.res[k]}`,
+          pick: k, on: (stage.give[k] || 0) > 0,
+          onPick: st => { st.give[k] = ((st.give[k] || 0) + 1) % ((priv.res[k] || 0) + 1); },
+        })),
+        { label: 'Discard ✓', disabled: total !== priv.mustDiscard,
+          action: { t: 'discard', give: stage.give } },
+      ],
+    };
+  }
+  if (pub.turn !== seat) return null;
+  if (pub.phase === 'setup') {
+    if (pub.setupStage === 'settlement') {
+      return {
+        title: 'Place a settlement',
+        items: (priv.legalVerts || []).slice(0, 20).map(v => ({
+          label: vertLabel(pub, v), focus: { v }, action: { t: 'placeSet', v },
+        })),
+      };
+    }
+    return {
+      title: 'Place the road',
+      items: (priv.legalEdges || []).map((e, k) => ({
+        label: `Road option ${k + 1}`, focus: { e }, action: { t: 'placeRoad', e },
+      })),
+    };
+  }
+  if (pub.step === 'roll') return { title: 'Your turn', items: [{ label: '🎲 Roll', action: { t: 'roll' } }] };
+  if (pub.step === 'bandit') {
+    return {
+      title: 'Move the bandit',
+      items: pub.board.hexes.map((hx, hi) => hi !== pub.bandit
+        ? { label: `${hx.res}${hx.num ? ' ' + hx.num : ''}`, focus: { hex: hi }, action: { t: 'bandit', hex: hi } }
+        : null).filter(Boolean),
+    };
+  }
+  if (pub.step === 'main') {
+    if (stage.mode === 'road') {
+      return {
+        title: 'Build road', items: [
+          ...(priv.legalEdges || []).map((e, k) => ({ label: `Road option ${k + 1}`, focus: { e }, action: { t: 'build', kind: 'road', e } })),
+          { label: '← back', pick: 'b', onPick: st => { st.mode = null; } },
+        ],
+      };
+    }
+    if (stage.mode === 'settlement') {
+      return {
+        title: 'Build settlement', items: [
+          ...(priv.legalVerts || []).map(v => ({ label: vertLabel(pub, v), focus: { v }, action: { t: 'build', kind: 'settlement', v } })),
+          { label: '← back', pick: 'b', onPick: st => { st.mode = null; } },
+        ],
+      };
+    }
+    if (stage.mode === 'city') {
+      return {
+        title: 'Upgrade to city', items: [
+          ...(priv.upgradable || []).map(v => ({ label: vertLabel(pub, v), focus: { v }, action: { t: 'build', kind: 'city', v } })),
+          { label: '← back', pick: 'b', onPick: st => { st.mode = null; } },
+        ],
+      };
+    }
+    if (stage.mode === 'trade') {
+      if (!stage.give) {
+        return {
+          title: 'Give 4 of…', items: [
+            ...RES.filter(k => (priv.res[k] || 0) >= 4).map(k => ({
+              label: `${RES_ICON[k]} ×4`, pick: k, onPick: st => { st.give = k; },
+            })),
+            { label: '← back', pick: 'b', onPick: st => { st.mode = null; } },
+          ],
+        };
+      }
+      return {
+        title: `4 ${RES_ICON[stage.give]} → 1 of…`, items: [
+          ...RES.filter(k => k !== stage.give).map(k => ({
+            label: RES_ICON[k], action: { t: 'trade', give: stage.give, get: k },
+          })),
+          { label: '← back', pick: 'b', onPick: st => { st.give = null; } },
+        ],
+      };
+    }
+    return {
+      title: 'Build & trade', items: [
+        { label: '🛤️ Road (🌲🧱)', pick: 'm', disabled: !(priv.legalEdges || []).length, onPick: st => { st.mode = 'road'; } },
+        { label: '🏠 Settlement (🌲🧱🐑🌾)', pick: 'm', disabled: !(priv.legalVerts || []).length, onPick: st => { st.mode = 'settlement'; } },
+        { label: '🏛️ City (🪨×3 🌾×2)', pick: 'm', disabled: !(priv.upgradable || []).length, onPick: st => { st.mode = 'city'; } },
+        { label: '🔁 Trade 4:1', pick: 'm', disabled: !RES.some(k => (priv.res[k] || 0) >= 4), onPick: st => { st.mode = 'trade'; } },
+        { label: 'End turn ✓', action: { t: 'end' } },
+      ],
+    };
+  }
+  return null;
+}

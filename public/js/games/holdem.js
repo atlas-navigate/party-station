@@ -1,4 +1,7 @@
 import { h, mount, cardEl, sheet } from '../ui.js';
+import { cardTable } from '../three-app/cardtable.js';
+import { makeCard } from '../three-app/assets.js';
+import { SEAT_COLORS } from '../three-app/assets.js';
 
 const STREETS = ['Pre-flop', 'Flop', 'Turn', 'River'];
 
@@ -72,43 +75,79 @@ function raiseSheet(pub, priv, you, send) {
 }
 
 export const tv = {
-  render(el, ctx) {
-    const { pub, seats } = ctx;
-    const r = pub.phase === 'payout' ? pub.results : null;
-    const board = r ? r.board : pub.board;
-    mount(el,
-      h('div', { style: 'width:100%;max-width:1200px' },
-        h('div', { class: 'center', style: 'margin-bottom:20px' },
-          h('div', { class: 'eyebrow', style: 'font-size:15px' },
-            pub.phase === 'payout' ? 'Showdown' : STREETS[pub.street] || ''),
-          h('div', { class: 'row', style: 'justify-content:center;margin-top:10px;min-height:110px' },
-            [0, 1, 2, 3, 4].map(i => board[i] ? cardEl(board[i], { size: 'lg', button: false }) : cardEl('back', { size: 'lg' }))),
-          h('div', { style: 'font-size:30px;font-weight:800;margin-top:10px' }, `Pot ${pub.pot} 🪙`),
-        ),
-        h('div', { class: 'row wrap', style: 'justify-content:center;gap:14px' },
-          seats.map((s, i) => {
-            const shown = r?.shown?.[i];
-            const winner = r?.pots?.some(p => p.winners.includes(i));
-            return h('div', {
-              class: 'banner center',
-              style: 'min-width:180px'
-                + (pub.turn === i ? ';box-shadow:0 4px 0 var(--marquee-edge),0 0 24px #ffb52e66' : '')
-                + (pub.busted[i] || (!pub.inHand[i] && pub.phase === 'hand') ? ';opacity:.4' : '')
-                + (winner ? ';background:#3a3145' : ''),
-            },
-              h('div', {}, (s.bot ? '🤖 ' : '') + s.name, pub.button === i ? ' 🔘' : ''),
-              shown
-                ? h('div', { class: 'row', style: 'justify-content:center;margin:6px 0' },
-                  shown.cards.map(c => cardEl(c, { size: 'sm', button: false })))
-                : pub.inHand[i] && h('div', { class: 'row', style: 'justify-content:center;margin:6px 0' },
-                  [cardEl('back', { size: 'sm' }), cardEl('back', { size: 'sm' })]),
-              h('div', { class: 'dim', style: 'font-size:16px' },
-                `🪙 ${pub.stacks[i]}`, pub.committed[i] ? ` · bet ${pub.committed[i]}` : '', pub.allin[i] ? ' · ALL IN' : ''),
-              shown && h('div', { style: 'font-size:14px;color:var(--marquee)' }, shown.name),
-              winner && h('div', { style: 'font-weight:800;color:var(--marquee)' },
-                `+${r.pots.filter(p => p.winners.includes(i)).reduce((a, p) => a + Math.floor(p.amount / p.winners.length), 0)} 🏆`),
-            );
-          })),
-      ));
+  mount(holder, ctx) {
+    return cardTable(holder, ctx, {
+      turnSeat: c => c.pub.phase === 'hand' ? c.pub.turn : -1,
+      seatCards: (c, i) => {
+        const r = c.pub.phase === 'payout' ? c.pub.results : null;
+        if (r?.shown?.[i]) return { faces: r.shown[i].cards };
+        return { count: c.pub.inHand[i] && !c.pub.busted[i] ? 2 : 0 };
+      },
+      peekCards: (c, i) => c.privOf(i)?.hole || [],
+      seatSub: (c, i) => {
+        const pub = c.pub;
+        if (pub.busted[i]) return '💀 busted';
+        const r = pub.phase === 'payout' ? pub.results : null;
+        const won = r?.pots?.filter(p => p.winners.includes(i))
+          .reduce((a, p) => a + Math.floor(p.amount / p.winners.length), 0) || 0;
+        let s = `🪙${pub.stacks[i]}`;
+        if (pub.button === i) s += ' 🔘';
+        if (pub.committed[i]) s += ` · bet ${pub.committed[i]}`;
+        if (pub.allin[i]) s += ' · ALL IN';
+        if (!pub.inHand[i] && pub.phase === 'hand') s += ' · folded';
+        if (won) s += ` · +${won} 🏆`;
+        if (r?.shown?.[i]) s += ` · ${r.shown[i].name}`;
+        return s;
+      },
+      centerKey: c => JSON.stringify([c.pub.board, c.pub.pot, c.pub.phase, c.pub.street, c.pub.turn, c.pub.handNum]),
+      center(c, C) {
+        const pub = c.pub;
+        const r = pub.phase === 'payout' ? pub.results : null;
+        const board = r ? r.board : pub.board;
+        for (let k = 0; k < 5; k++) {
+          const m = makeCard(board[k] || 'back');
+          m.position.set((k - 2) * 0.72, 0.05, -0.2);
+          if (!board[k]) { m.rotation.y = Math.PI; m.scale.setScalar(0.92); }
+          C.group.add(m);
+        }
+        C.label(`Pot ${pub.pot} 🪙`, { y: 1.35, size: 30, bg: '#ffb52e' });
+        C.label(pub.phase === 'payout' ? 'Showdown' : (STREETS[pub.street] || '') + ` · hand #${pub.handNum}`,
+          { y: 2.3, size: 21 });
+        // Committed chips in front of each live better.
+        c.seats.forEach((s, i) => {
+          if (pub.committed[i] > 0) {
+            const p = C.seatPos(i, 2.6);
+            C.chips(p.x, p.z, SEAT_COLORS[i % 6], Math.max(1, Math.round(pub.committed[i] / pub.bb)));
+          }
+        });
+      },
+    });
   },
 };
+
+export function padChoices({ pub, priv, seat }) {
+  if (pub.phase === 'payout' && !pub.busted[seat]) {
+    return { title: '', items: [{ label: 'Next hand →', action: { t: 'next' } }] };
+  }
+  if (pub.phase !== 'hand' || pub.turn !== seat) return null;
+  const toCall = priv.toCall;
+  const stack = pub.stacks[seat];
+  const maxTo = (pub.committed[seat] || 0) + stack;
+  const half = Math.min(maxTo, priv.minRaiseTo + Math.floor(pub.pot / 2 / pub.bb) * pub.bb);
+  const potR = Math.min(maxTo, priv.minRaiseTo + Math.floor(pub.pot / pub.bb) * pub.bb);
+  const raises = [...new Set([Math.min(priv.minRaiseTo, maxTo), half, potR, maxTo])]
+    .filter(v => v > pub.currentBet);
+  return {
+    title: toCall > 0 ? `${toCall} to call` : 'Your action',
+    items: [
+      toCall > 0
+        ? { label: toCall >= stack ? 'Call ALL-IN' : `Call ${toCall}`, action: { t: 'call' } }
+        : { label: 'Check', action: { t: 'check' } },
+      ...raises.map(v => ({
+        label: v === maxTo ? `Raise ALL-IN (${v})` : `Raise to ${v}`,
+        action: { t: 'raise', to: v },
+      })),
+      { label: 'Fold', action: { t: 'fold' } },
+    ],
+  };
+}

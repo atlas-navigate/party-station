@@ -265,6 +265,34 @@ body.tv .tv-stage {
 .tv-log { position: absolute; left: 0; bottom: 0; max-width: 34%; font-size: 17px; }
 canvas.arcade { background: var(--felt-deep); border-radius: 18px; box-shadow: 0 8px 0 var(--edge), 0 20px 60px #000a; }
 
+/* Console additions */
+.tv-scene { flex: 1; min-height: 0; position: relative; }
+.tv-focus { outline: 4px solid var(--marquee); outline-offset: 2px; transform: scale(1.04); }
+.tv-hints {
+  display: flex; gap: 26px; justify-content: center; padding-top: 12px;
+  font-size: 16px; color: var(--chalk-dim);
+}
+.tv-hints b { color: var(--marquee); font-weight: 800; }
+.pad-menus {
+  position: absolute; left: 40px; bottom: 64px; display: flex; gap: 14px; z-index: 10;
+}
+.pad-menu {
+  background: #10121fee; border-radius: 14px; padding: 12px 14px;
+  box-shadow: 0 5px 0 var(--edge), 0 14px 50px #000c; min-width: 240px;
+  max-height: 46vh; overflow: hidden;
+}
+.pad-menu-title {
+  font-size: 13px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase;
+  color: var(--chalk-dim); margin-bottom: 8px;
+}
+.pad-menu-item {
+  padding: 8px 12px; border-radius: 9px; font-weight: 700; font-size: 17px;
+}
+.pad-menu-item.focus { background: var(--marquee); color: #241a02; }
+.pad-menu-item.dis { opacity: .35; }
+.pad-menu-item.on::after { content: ' ✓'; color: var(--board); }
+.pad-menu-item.focus.on::after { color: #06281a; }
+
 @media (max-width: 420px) {
   .game-grid { gap: 10px; }
   .tok { font-size: 16px; }

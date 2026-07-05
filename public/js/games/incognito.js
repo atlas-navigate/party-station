@@ -1,4 +1,6 @@
 import { h, mount } from '../ui.js';
+import { createScene, THREE } from '../three-app/scene.js';
+import { makeLabel, SEAT_COLORS as SEAT_HEX } from '../three-app/assets.js';
 
 export const player = {
   render(el, ctx) {
@@ -64,32 +66,112 @@ export const player = {
   },
 };
 
+// 3D game-show stage: everyone at a podium under the spotlights, speech
+// bubbles for clues, ghosts when you're voted off.
 export const tv = {
-  render(el, ctx) {
-    const { pub, seats } = ctx;
-    mount(el,
-      h('div', { style: 'width:100%;max-width:1100px' },
-        h('div', { class: 'center', style: 'margin-bottom:22px' },
-          h('div', { class: 'eyebrow', style: 'font-size:16px' }, `Round ${pub.round} · Category`),
-          h('div', { style: 'font-size:42px;font-weight:800' }, pub.category)),
-        h('div', { class: 'row wrap', style: 'justify-content:center;gap:14px' },
-          seats.map((s, i) => h('div', {
-            class: 'banner center',
-            style: 'min-width:170px' + (pub.alive[i] ? '' : ';opacity:.35'),
-          },
-            h('div', {}, (s.bot ? '🤖 ' : '') + s.name, pub.alive[i] ? '' : ' 👻'),
-            h('div', { style: 'font-size:26px;font-weight:800;min-height:38px;margin-top:6px' },
-              pub.step === 'vote' || pub.clues[i] !== '…' ? (pub.clues[i] ? `“${pub.clues[i]}”` : '') : (pub.clues[i] ? '✓' : '…')),
-            pub.step === 'vote' && pub.alive[i] && h('div', { class: 'dim', style: 'font-size:14px' },
-              pub.voted.includes(i) ? 'voted ✓' : 'voting…'),
-          ))),
-        h('div', { class: 'center dim', style: 'margin-top:26px;font-size:22px' },
-          pub.step === 'clue' ? 'Everyone types a one-word clue on their phone…'
-            : pub.step === 'vote' ? 'Discuss! Then vote on your phones. 🗳️'
-              : pub.step === 'guess' ? 'The impostor gets one guess at the word…' : ''),
-        pub.allClues.length > 1 && h('div', { class: 'center dim', style: 'margin-top:14px;font-size:16px' },
-          pub.allClues.slice(0, -1).map(hh =>
-            h('div', {}, `R${hh.round}: ` + Object.entries(hh.clues).map(([s2, c]) => `${seats[s2].name}: ${c}`).join(' · ')))),
-      ));
+  mount(holder, ctx) {
+    const sc = createScene(holder, { camPos: [0, 5.4, 10.6], lookAt: [0, 1.2, 0], fov: 44, bg: 0x120f22 });
+    const n = ctx.seats.length;
+    const stage = new THREE.Mesh(new THREE.CylinderGeometry(8, 8.6, 0.5, 36, 1, false, Math.PI, Math.PI),
+      new THREE.MeshLambertMaterial({ color: 0x2a2145 }));
+    stage.position.y = -0.25;
+    sc.scene.add(stage);
+
+    const podiums = [];
+    for (let i = 0; i < n; i++) {
+      const a = Math.PI * (0.16 + 0.68 * (n === 1 ? 0.5 : i / (n - 1)));
+      const x = -Math.cos(a) * 6.1, z = -Math.sin(a) * 4.6 + 3.4;
+      const g = new THREE.Group();
+      const pod = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.55, 1.15, 10),
+        new THREE.MeshLambertMaterial({ color: 0x3a3160 }));
+      pod.position.y = 0.57;
+      const top = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.08, 10),
+        new THREE.MeshLambertMaterial({ color: SEAT_HEX[i % 6] }));
+      top.position.y = 1.18;
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.34, 14, 12),
+        new THREE.MeshLambertMaterial({ color: SEAT_HEX[i % 6] }));
+      head.position.y = 1.85;
+      g.add(pod, top, head);
+      const name = makeLabel(`${ctx.seats[i].bot ? '🤖 ' : ''}${ctx.seats[i].name}`, { size: 22, bg: '#10121fcc' });
+      name.position.y = 0.35;
+      g.add(name);
+      g.position.set(x, 0, z);
+      sc.scene.add(g);
+      podiums.push({ group: g, head, bubble: null });
+    }
+
+    const hudTop = document.createElement('div');
+    hudTop.style.cssText = 'position:absolute;left:50%;top:10px;transform:translateX(-50%);text-align:center;';
+    const hudStatus = document.createElement('div');
+    hudStatus.style.cssText = 'position:absolute;left:50%;bottom:12px;transform:translateX(-50%);'
+      + 'font-size:19px;color:#9aa0b8;text-align:center;width:80%;';
+    sc.hud.append(hudTop, hudStatus);
+
+    function update(c) {
+      const pub = c.pub;
+      podiums.forEach((p, i) => {
+        const alive = pub.alive[i];
+        p.group.traverse(o => { if (o.material) { o.material.transparent = !alive; o.material.opacity = alive ? 1 : 0.25; } });
+        if (p.bubble) { p.group.remove(p.bubble); p.bubble = null; }
+        const clue = pub.clues[i];
+        const showClue = clue && clue !== '…';
+        const txt = showClue ? `“${clue}”` : (clue === '…' ? '✓' : null);
+        if (txt && alive) {
+          p.bubble = makeLabel(txt, { size: showClue ? 30 : 22, bg: showClue ? '#f2efe4' : '#10121fcc', color: showClue ? '#1c1c28' : '#9aa0b8' });
+          p.bubble.position.y = 2.6;
+          p.group.add(p.bubble);
+        }
+        if (pub.step === 'vote' && alive && !p.voteBadgeShown) {
+          // voted-state shown via status line; keep podium clean
+        }
+      });
+      hudTop.innerHTML = `
+        <div style="font-size:13px;letter-spacing:2px;color:#9aa0b8;font-weight:800">ROUND ${pub.round} · CATEGORY</div>
+        <div style="font-size:38px;font-weight:800">${pub.category}</div>`;
+      hudStatus.textContent = pub.step === 'clue'
+        ? 'Everyone gives a one-word clue (phone or controller)…'
+        : pub.step === 'vote'
+          ? `Discuss, then vote! Voted: ${pub.voted.length}/${pub.alive.filter(Boolean).length}`
+          : pub.step === 'guess' ? 'Caught! The impostor gets one guess at the word…' : '';
+      sc.invalidate();
+    }
+
+    return { update, rehome: h2 => sc.rehome(h2), dispose: () => sc.dispose() };
   },
 };
+
+const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+
+export function padChoices({ pub, priv, seat, seats }, stage) {
+  if (pub.phase === 'over' || !pub.alive[seat]) return null;
+  if (pub.step === 'clue' && !priv.yourClue) {
+    stage.word = stage.word || '';
+    return {
+      title: `Clue: ${stage.word || '_'}`, sticky: true,
+      items: [
+        ...LETTERS.map(L => ({
+          label: L, pick: L,
+          onPick: st => { if (st.word.length < 14) st.word += L; },
+        })),
+        { label: '⌫ erase', pick: 'del', onPick: st => { st.word = st.word.slice(0, -1); } },
+        { label: 'Say it ✓', disabled: !stage.word,
+          action: { t: 'clue', word: (stage.word || '').toLowerCase() } },
+      ],
+    };
+  }
+  if (pub.step === 'vote' && priv.yourVote == null) {
+    return {
+      title: 'Who is incognito?',
+      items: seats.map((s, i) => (pub.alive[i] && i !== seat)
+        ? { label: `${s.name} — “${pub.clues[i] || '…'}”`, action: { t: 'vote', seat: i } }
+        : null).filter(Boolean),
+    };
+  }
+  if (pub.step === 'guess' && priv.isImpostor) {
+    return {
+      title: 'One shot — the word was…',
+      items: pub.guessOptions.map(w => ({ label: w, action: { t: 'guess', word: w } })),
+    };
+  }
+  return null;
+}

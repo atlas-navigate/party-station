@@ -22,6 +22,13 @@ let session = null;  // {gameId, mode, options, seats:[{name,bot,pid}], game, ov
 const send = (ws, msg) => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg)); };
 const uid = () => crypto.randomBytes(8).toString('hex');
 
+// Route a message to a player: phones get it directly; gamepad players
+// (owned by a TV connection) get it via their TV, tagged with the pad index.
+const sendTo = (p, msg) => {
+  if (p.viaTv) send(p.viaTv, { ...msg, pad: p.pad });
+  else send(p.ws, msg);
+};
+
 // ---------------------------------------------------------------- state sync
 
 function gameLite() {
@@ -52,12 +59,34 @@ function sharedState() {
   };
 }
 
+// For TV recipients, `recipient` is the TV's websocket; for players it's the
+// player record.
 function syncFor(recipient, isTV, shared = sharedState()) {
+  const recipientTvWs = isTV ? recipient : null;
   const msg = { t: 'sync', phase, ...shared };
   if (!isTV && recipient) {
     msg.you = { id: recipient.id, name: recipient.name };
   } else {
     msg.isTV = true;
+    // Everything the TV needs to act for its gamepad players.
+    msg.pads = {};
+    for (const p of players.values()) {
+      if (p.viaTv !== recipientTvWs || !p.connected) continue;
+      const info = { name: p.name, id: p.id };
+      if (phase === 'lobby' && lobby) {
+        info.joined = lobby.humans.includes(p.id);
+        info.isHost = lobby.hostPid === p.id;
+      }
+      if ((phase === 'game' || phase === 'gameover') && session) {
+        info.seat = session.seats.findIndex(s => s.pid === p.id);
+        info.isHost = p.id === hostPid();
+        if (info.seat >= 0 && session.mode === 'server' && session.game) {
+          info.priv = session.game.priv(info.seat);
+          info.awaited = session.game.awaiting().includes(info.seat);
+        }
+      }
+      msg.pads[p.pad] = info;
+    }
   }
   if (phase === 'lobby' && lobby) {
     msg.lobby = {
@@ -98,15 +127,17 @@ function syncFor(recipient, isTV, shared = sharedState()) {
 
 export function broadcast() {
   const shared = sharedState();
-  for (const p of players.values()) if (p.connected) send(p.ws, syncFor(p, false, shared));
-  for (const ws of tvSockets) send(ws, syncFor(null, true, shared));
+  for (const p of players.values()) {
+    if (p.connected && !p.viaTv) send(p.ws, syncFor(p, false, shared));
+  }
+  for (const ws of tvSockets) send(ws, syncFor(ws, true, shared));
 }
 
 function toast(target, text) {
   if (target === 'all') {
-    for (const p of players.values()) send(p.ws, { t: 'toast', text });
+    for (const p of players.values()) if (!p.viaTv) send(p.ws, { t: 'toast', text });
     for (const ws of tvSockets) send(ws, { t: 'toast', text });
-  } else send(target.ws, { t: 'toast', text });
+  } else if (target) sendTo(target, { t: 'toast', text });
 }
 
 // ---------------------------------------------------------------- lifecycle
@@ -122,10 +153,11 @@ function uniqueName(raw, selfPid) {
 function attachPlayer(ws, hello) {
   // Resume by token first; then reclaim a disconnected player by name
   // (helps phones that dropped localStorage or switched browsers).
-  let p = hello.token && [...players.values()].find(x => x.token === hello.token);
+  let p = hello.token && [...players.values()].find(x => x.token === hello.token && x.pad == null);
   if (!p && hello.name) {
     p = [...players.values()].find(
-      x => !x.connected && x.name.toLowerCase() === String(hello.name).trim().toLowerCase());
+      x => !x.connected && x.pad == null
+        && x.name.toLowerCase() === String(hello.name).trim().toLowerCase());
   }
   if (!p) {
     p = { id: uid(), token: uid(), name: '', ws: null, connected: false };
@@ -345,7 +377,7 @@ function onPlayerMsg(p, m) {
       const seatIdx = session.seats.findIndex(s => s.pid === p.id && !s.bot);
       if (seatIdx < 0) break;
       const res = session.game.act(seatIdx, m.a);
-      if (res?.err) { send(p.ws, { t: 'nope', text: res.err }); break; }
+      if (res?.err) { sendTo(p, { t: 'nope', text: res.err }); break; }
       pump();
       broadcast(); break;
     }
@@ -402,8 +434,46 @@ function onPlayerMsg(p, m) {
   }
 }
 
+function padPlayer(ws, pad) {
+  return [...players.values()].find(x => x.viaTv === ws && x.pad === pad);
+}
+
 function onTvMsg(ws, m) {
   switch (m.t) {
+    case 'padHello': { // a Bluetooth controller pressed a button on this TV
+      let p = padPlayer(ws, m.pad);
+      if (!p && m.name) {
+        // TV reloaded mid-game: reclaim the disconnected pad player by name.
+        p = [...players.values()].find(x => x.pad != null && !x.connected
+          && x.name.toLowerCase() === String(m.name).trim().toLowerCase());
+      }
+      if (p) {
+        p.viaTv = ws; p.pad = m.pad; p.connected = true;
+      } else {
+        p = { id: uid(), token: uid(), name: '', ws: null, viaTv: ws, pad: m.pad, connected: true };
+        p.name = uniqueName(m.name || `P${m.pad + 1} 🎮`, p.id);
+        players.set(p.id, p);
+      }
+      broadcast(); break;
+    }
+    case 'padMsg': { // controller-driven action, relayed by the TV
+      const p = padPlayer(ws, m.pad);
+      if (p && p.connected && m.m && typeof m.m.t === 'string') onPlayerMsg(p, m.m);
+      break;
+    }
+    case 'padBye': {
+      const p = padPlayer(ws, m.pad);
+      if (p) {
+        p.connected = false;
+        if (phase === 'lobby' && lobby) {
+          lobby.humans = lobby.humans.filter(pid => pid !== p.id);
+          if (lobby.hostPid === p.id && lobby.humans.length) lobby.hostPid = lobby.humans[0];
+          if (!lobby.humans.length) { returnToHub(); break; }
+        }
+        if (phase === 'hub') players.delete(p.id);
+      }
+      broadcast(); break;
+    }
     case 'relayEnd': { // the TV sim finished an arcade game
       if (phase !== 'game' || !session || session.mode !== 'relay') break;
       session.over = m.result || { title: 'Game over' };
@@ -431,7 +501,7 @@ export function handleConnection(ws) {
       role = m.role === 'tv' ? 'tv' : 'player';
       if (role === 'tv') {
         tvSockets.add(ws);
-        send(ws, syncFor(null, true));
+        send(ws, syncFor(ws, true));
       } else {
         const p = attachPlayer(ws, m);
         send(ws, syncFor(p, false));
@@ -448,6 +518,18 @@ export function handleConnection(ws) {
   ws.on('close', () => {
     if (role === 'tv') {
       tvSockets.delete(ws);
+      // Gamepad players live on the TV connection.
+      for (const p of [...players.values()]) {
+        if (p.viaTv === ws) {
+          p.connected = false;
+          if (phase === 'hub') players.delete(p.id);
+        }
+      }
+      if (phase === 'lobby' && lobby) {
+        lobby.humans = lobby.humans.filter(pid => players.get(pid)?.connected);
+        if (!lobby.humans.length) { returnToHub(); return; }
+        if (!players.get(lobby.hostPid)?.connected) lobby.hostPid = lobby.humans[0];
+      }
       // A relay game cannot outlive its screen.
       if (phase === 'game' && session?.mode === 'relay' && tvSockets.size === 0) {
         toast('all', 'The big screen disconnected — arcade game ended.');

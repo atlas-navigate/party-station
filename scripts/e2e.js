@@ -103,6 +103,33 @@ alice.send({ t: 'backToHub' });
 await waitFor(bob, s => s.phase === 'hub');
 ok('back to hub');
 
+// Gamepad-player flow: a Bluetooth controller (via the TV socket) claims a
+// seat, opens a lobby, and plays a whole game with actions relayed by the TV.
+tv.send({ t: 'padHello', pad: 0, name: 'PadOne' });
+await waitFor(tv, s => s.pads && s.pads[0]);
+ok('pad player joined via TV');
+tv.send({ t: 'padMsg', pad: 0, m: { t: 'openLobby', gameId: 'candydash' } });
+await waitFor(tv, s => s.phase === 'lobby');
+tv.send({ t: 'padMsg', pad: 0, m: { t: 'start' } }); // bots fill the second seat
+await waitFor(tv, s => s.phase === 'game' && s.pads[0].seat >= 0);
+ok('pad player seated in game');
+const padAuto = s => {
+  if (s.phase === 'game' && s.game?.gameId === 'candydash' && s.pads?.[0]?.awaited) {
+    setTimeout(() => {
+      if (tv.sync.phase === 'game') tv.send({ t: 'padMsg', pad: 0, m: { t: 'act', a: { t: 'draw' } } });
+    }, 40);
+  }
+};
+tv.onSync(padAuto);
+padAuto(tv.sync);
+await waitFor(tv, s => s.phase === 'gameover');
+ok('pad player finished a full game');
+tv.send({ t: 'padMsg', pad: 0, m: { t: 'backToHub' } });
+await waitFor(tv, s => s.phase === 'hub');
+tv.send({ t: 'padBye', pad: 0 });
+await waitFor(tv, s => !s.pads || !s.pads[0]);
+ok('pad player left cleanly');
+
 // Hearts with auto-filled bots should start straight away.
 bob.send({ t: 'openLobby', gameId: 'hearts' });
 await waitFor(bob, s => s.phase === 'lobby');
