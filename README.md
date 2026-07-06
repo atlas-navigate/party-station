@@ -72,13 +72,21 @@ curl -fsSL https://raw.githubusercontent.com/atlas-navigate/party-station/main/s
 
 That sets the hostname to `party-station` (mDNS via avahi →
 `party-station.local`), installs Node.js, installs the app under
-`/opt/party-station`, and starts a systemd service on port 80.
+`/opt/party-station`, starts a systemd service on port 80 — and, on the
+desktop image, **turns the Pi into a console**: it auto-logs into the
+desktop, disables screen blanking, and boots straight into Chromium
+fullscreen on the TV view (`http://localhost/tv`). Plug the HDMI cable into
+a TV and it just shows the console; the kiosk waits for the server, and
+relaunches the browser if it ever exits. Don't want that (e.g. the Pi is
+also your desktop machine)? Run the setup with `SETUP_KIOSK=0`:
 
-For the TV you have two options:
-- Plug the Pi into the TV and re-run with `SETUP_KIOSK=1` — Chromium opens
-  `http://localhost/tv` fullscreen on boot (desktop image required), or
-- Open `http://party-station.local/tv` in any browser on a smart TV,
-  Fire stick, or a laptop plugged into the TV.
+```bash
+curl -fsSL https://raw.githubusercontent.com/atlas-navigate/party-station/main/scripts/setup-pi.sh | sudo SETUP_KIOSK=0 bash
+```
+
+On Raspberry Pi OS **Lite** there's no browser to run, so the kiosk is
+skipped — open `http://party-station.local/tv` in any browser on a smart
+TV, Fire stick, or a laptop plugged into the TV instead.
 
 > **Pi 4 (2GB) note:** the server itself is tiny, and the 3D scenes are tuned
 > for the Pi's GPU (low-poly procedural assets, pixel ratio 1, scenes only

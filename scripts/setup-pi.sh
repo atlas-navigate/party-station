@@ -8,8 +8,8 @@
 #   2. Ensures avahi (mDNS), git, and Node.js 20+ are installed
 #   3. Clones the app to /opt/party-station and installs dependencies
 #   4. Installs + starts a systemd service on port 80 (auto-restarts, applies updates)
-#   5. Optionally sets up a Chromium kiosk that opens the TV screen on boot
-#      (run with SETUP_KIOSK=1 to enable)
+#   5. Makes the Pi a console: boots straight into a Chromium kiosk showing the
+#      TV view on the HDMI screen (desktop image required; skip with SETUP_KIOSK=0)
 set -euo pipefail
 
 REPO="https://github.com/atlas-navigate/party-station.git"
@@ -70,30 +70,72 @@ systemctl enable --now party-station
 sleep 2
 systemctl --no-pager --lines=0 status party-station || true
 
-if [ -n "${SETUP_KIOSK:-}" ]; then
-  echo "==> Setting up TV kiosk autostart for user ${RUN_USER}…"
-  KIOSK_BROWSER=""
-  command -v chromium-browser >/dev/null 2>&1 && KIOSK_BROWSER="chromium-browser"
-  [ -z "$KIOSK_BROWSER" ] && command -v chromium >/dev/null 2>&1 && KIOSK_BROWSER="chromium"
-  if [ -z "$KIOSK_BROWSER" ]; then
-    apt-get install -y -qq chromium-browser >/dev/null 2>&1 || apt-get install -y -qq chromium >/dev/null 2>&1 || true
+# ── TV kiosk: on by default — the Pi is a console. Skip with SETUP_KIOSK=0. ──
+if [ "${SETUP_KIOSK:-1}" != "0" ]; then
+  echo "==> Setting up the TV kiosk (HDMI boots straight into the console)…"
+  HAS_DESKTOP=0
+  for bin in labwc wayfire startlxde-pi lxsession lightdm; do
+    command -v "$bin" >/dev/null 2>&1 && HAS_DESKTOP=1 && break
+  done
+  if [ "$HAS_DESKTOP" = 0 ]; then
+    echo "    No desktop session found (Raspberry Pi OS Lite?) — kiosk skipped."
+    echo "    Use the desktop image to drive the TV from the Pi, or open"
+    echo "    http://party-station.local/tv on a smart TV's browser."
+  else
+    KIOSK_BROWSER=""
     command -v chromium-browser >/dev/null 2>&1 && KIOSK_BROWSER="chromium-browser"
     [ -z "$KIOSK_BROWSER" ] && command -v chromium >/dev/null 2>&1 && KIOSK_BROWSER="chromium"
-  fi
-  if [ -n "$KIOSK_BROWSER" ]; then
-    AUTOSTART_DIR="/home/${RUN_USER}/.config/autostart"
-    mkdir -p "$AUTOSTART_DIR"
-    cat > "$AUTOSTART_DIR/party-station-kiosk.desktop" <<EOF
+    if [ -z "$KIOSK_BROWSER" ]; then
+      apt-get install -y -qq chromium-browser >/dev/null 2>&1 || apt-get install -y -qq chromium >/dev/null 2>&1 || true
+      command -v chromium-browser >/dev/null 2>&1 && KIOSK_BROWSER="chromium-browser"
+      [ -z "$KIOSK_BROWSER" ] && command -v chromium >/dev/null 2>&1 && KIOSK_BROWSER="chromium"
+    fi
+    if [ -n "$KIOSK_BROWSER" ]; then
+      # Console behavior: log straight into the desktop, never blank the TV.
+      if command -v raspi-config >/dev/null 2>&1; then
+        raspi-config nonint do_boot_behaviour B4 >/dev/null 2>&1 || true
+        raspi-config nonint do_blanking 1 >/dev/null 2>&1 || true
+      fi
+
+      KIOSK_CMD="$APP_DIR/scripts/kiosk.sh"
+      chmod +x "$KIOSK_CMD"
+      HOME_DIR="$(getent passwd "$RUN_USER" | cut -d: -f6)"
+      HOME_DIR="${HOME_DIR:-/home/$RUN_USER}"
+
+      # Hook every session type Raspberry Pi OS ships; kiosk.sh holds a lock
+      # so at most one instance runs even if two mechanisms fire.
+      AUTOSTART_DIR="$HOME_DIR/.config/autostart"
+      mkdir -p "$AUTOSTART_DIR"
+      cat > "$AUTOSTART_DIR/party-station-kiosk.desktop" <<EOF
 [Desktop Entry]
 Type=Application
 Name=Party Station TV
-Exec=${KIOSK_BROWSER} --kiosk --noerrdialogs --disable-session-crashed-bubble --autoplay-policy=no-user-gesture-required http://localhost/tv
+Exec=$KIOSK_CMD
 X-GNOME-Autostart-enabled=true
 EOF
-    chown -R "$RUN_USER":"$RUN_USER" "/home/${RUN_USER}/.config"
-    echo "    Kiosk will open the TV screen at next boot (desktop session required)."
-  else
-    echo "    Could not find/install Chromium — skipping kiosk. Open http://localhost/tv manually."
+      chown -R "$RUN_USER":"$RUN_USER" "$AUTOSTART_DIR"
+
+      if command -v labwc >/dev/null 2>&1; then
+        LABWC_DIR="$HOME_DIR/.config/labwc"
+        mkdir -p "$LABWC_DIR"
+        touch "$LABWC_DIR/autostart"
+        grep -qF "$KIOSK_CMD" "$LABWC_DIR/autostart" || echo "$KIOSK_CMD &" >> "$LABWC_DIR/autostart"
+        chown -R "$RUN_USER":"$RUN_USER" "$LABWC_DIR"
+      fi
+
+      if command -v wayfire >/dev/null 2>&1; then
+        WAYFIRE_INI="$HOME_DIR/.config/wayfire.ini"
+        touch "$WAYFIRE_INI"
+        if ! grep -qF "$KIOSK_CMD" "$WAYFIRE_INI"; then
+          printf '\n[autostart]\nparty_station_kiosk = %s\n' "$KIOSK_CMD" >> "$WAYFIRE_INI"
+        fi
+        chown "$RUN_USER":"$RUN_USER" "$WAYFIRE_INI"
+      fi
+
+      echo "    Kiosk installed — the TV view opens fullscreen at next boot."
+    else
+      echo "    Could not find/install Chromium — skipping kiosk. Open http://localhost/tv manually."
+    fi
   fi
 fi
 
@@ -103,8 +145,8 @@ cat <<EOF
 ✅ Party Station is up!
 
    Phones:      http://party-station.local   (or http://${IP})
-   Big screen:  http://party-station.local/tv on the TV's browser
-                (re-run with SETUP_KIOSK=1 to auto-open it on boot)
+   Big screen:  plug the Pi into the TV — it boots straight into the console
+                (or open http://party-station.local/tv on a smart TV's browser)
 
    Updates: the station checks GitHub every 15 minutes and installs new
    versions automatically between games. You can also press "Check for
