@@ -8,6 +8,7 @@ let scratchKey = null;
 let scratch = {};           // per-game-session module scratch space
 const modules = {};         // gameId -> loaded client module
 let padActive = false;
+let hubMode = null;         // landing choice: 'party' | 'retro' (asked once per visit)
 
 const net = connect({
   role: 'player',
@@ -61,42 +62,89 @@ function wordmark() {
     ch === ' ' ? h('span', { class: 'gap' }) : h('span', {}, ch)));
 }
 
+// Landing prompt: retro games on the emulator, or Party Station's own games?
+function chooseScreen() {
+  const emuGames = (sync.emu?.systems || []).reduce((n, s) => n + s.games.length, 0);
+  return h('div', { class: 'screen stack', style: 'justify-content:center;min-height:100vh;padding-bottom:40px' },
+    wordmark(),
+    h('p', { class: 'center dim', style: 'margin:8px 0 20px' }, 'What are we playing?'),
+    h('button', {
+      class: 'game-tile cat-cards', style: 'min-height:110px',
+      onclick: () => { hubMode = 'party'; render(); },
+    },
+      h('span', { class: 'g-icon' }, '🃏'),
+      h('span', { class: 'g-name' }, 'Party Games'),
+      h('span', { class: 'g-sub' }, 'Cards · Board · Arcade — phones and controllers')),
+    h('button', {
+      class: 'game-tile cat-arcade', style: 'min-height:110px',
+      onclick: () => { hubMode = 'retro'; render(); },
+    },
+      h('span', { class: 'g-icon' }, '🕹️'),
+      h('span', { class: 'g-name' }, 'Retro Games'),
+      h('span', { class: 'g-sub' }, sync.emu?.available
+        ? `${emuGames} classics on the emulator`
+        : 'Real classics — add your ROMs')),
+  );
+}
+
+function hubTopbar(title) {
+  return h('div', { class: 'topbar' },
+    h('div', {},
+      h('div', { class: 'eyebrow' }, 'Party Station'),
+      h('h1', {}, title),
+    ),
+    h('div', { class: 'row' },
+      h('button', { class: 'tok small ghost', onclick: () => { hubMode = null; render(); } }, '⇄'),
+      h('button', { class: 'tok small', onclick: settingsSheet, 'aria-label': 'Settings' }, '⚙️ ' + (sync.you?.name || '')),
+    ),
+  );
+}
+
 function hubScreen() {
-  const cats = ['cards', 'board', 'arcade', ...(sync.emu?.available ? ['cabinet'] : [])];
+  if (hubMode === 'retro') return retroScreen();
+  const cats = ['cards', 'board', 'arcade'];
   let cat = localStorage.getItem('ps-cat') || 'cards';
   if (!cats.includes(cat)) cat = 'cards';
   const games = sync.games.filter(g => g.category === cat);
   return h('div', { class: 'screen' },
-    h('div', { class: 'topbar' },
-      h('div', {},
-        h('div', { class: 'eyebrow' }, 'Party Station'),
-        h('h1', {}, 'Pick a game'),
-      ),
-      h('button', { class: 'tok small', onclick: settingsSheet, 'aria-label': 'Settings' }, '⚙️ ' + (sync.you?.name || '')),
-    ),
+    hubTopbar('Pick a game'),
     sync.tvCount === 0 && h('div', { class: 'banner', style: 'margin-bottom:12px;font-size:13px;' },
       '📺 No big screen yet — open ', h('b', {}, location.host + '/tv'), ' on the TV for the full experience.'),
     h('div', { class: 'cat-tabs' }, cats.map(c =>
       h('button', {
-        class: 'tok' + (c === cat ? ' on-' + (c === 'cabinet' ? 'arcade' : c) : ''),
-        style: cats.length > 3 ? 'font-size:12px;padding:10px 2px' : '',
+        class: 'tok' + (c === cat ? ' on-' + c : ''),
         onclick: () => { localStorage.setItem('ps-cat', c); render(); },
       }, catName(c)))),
-    cat === 'cabinet'
-      ? cabinetGrid()
-      : h('div', { class: 'game-grid' }, games.map(g => {
-        const save = sync.saves[g.id];
-        return h('button', { class: `game-tile cat-${g.category}`, onclick: () => gameSheet(g, save) },
-          save && h('span', { class: 'g-save' }, 'SAVED'),
-          h('span', { class: 'g-icon' }, g.icon),
-          h('span', { class: 'g-name' }, g.name),
-          h('span', { class: 'g-sub' }, `${g.minPlayers === g.maxPlayers ? g.minPlayers : g.minPlayers + '–' + g.maxPlayers} players`),
-          h('span', { class: 'g-sub' }, g.tagline),
-        );
-      })),
+    h('div', { class: 'game-grid' }, games.map(g => {
+      const save = sync.saves[g.id];
+      return h('button', { class: `game-tile cat-${g.category}`, onclick: () => gameSheet(g, save) },
+        save && h('span', { class: 'g-save' }, 'SAVED'),
+        h('span', { class: 'g-icon' }, g.icon),
+        h('span', { class: 'g-name' }, g.name),
+        h('span', { class: 'g-sub' }, `${g.minPlayers === g.maxPlayers ? g.minPlayers : g.minPlayers + '–' + g.maxPlayers} players`),
+        h('span', { class: 'g-sub' }, g.tagline),
+      );
+    })),
     h('div', { class: 'divider' }),
     h('div', { class: 'eyebrow', style: 'margin-bottom:8px' }, `Here now (${sync.players.length})`),
     h('div', { class: 'row wrap' }, sync.players.map(p => chipEl(p))),
+  );
+}
+
+function retroScreen() {
+  return h('div', { class: 'screen' },
+    hubTopbar('Retro games'),
+    sync.emu?.available
+      ? cabinetGrid()
+      : h('div', { class: 'stack', style: 'margin-top:10px' },
+        h('div', { style: 'font-size:56px;text-align:center' }, '🕹️'),
+        h('p', { class: 'center dim' }, 'No retro games yet.'),
+        h('p', { class: 'dim', style: 'font-size:14px' },
+          'Add ROMs of games you own from any laptop or phone at ',
+          h('b', {}, location.host + '/roms'), ' — they appear here within a moment.'),
+        h('a', { class: 'tok primary big', style: 'text-align:center', href: '/roms' }, '⬆️ Add ROMs'),
+        h('p', { class: 'dim', style: 'font-size:13px' },
+          'If the emulator itself is missing, re-run the setup script on the Pi — it installs RetroArch automatically.')),
   );
 }
 
@@ -121,7 +169,8 @@ function cabinetGrid() {
           h('span', { class: 'g-name', style: 'font-size:14px' }, g.title)))),
     )),
     h('p', { class: 'dim', style: 'font-size:12px;margin-top:10px' },
-      'Add ROMs of games you own to ~/RetroPie/roms/<system> on the Pi — they show up here within a minute.'),
+      'Add ROMs of games you own at ', h('b', {}, location.host + '/roms'),
+      ' (or scp them into ~/RetroPie/roms/incoming) — they show up here within a moment.'),
   );
 }
 
@@ -178,6 +227,9 @@ function settingsSheet() {
       h('p', { class: 'dim', style: 'font-size:14px' },
         `On the TV, open a browser to `, h('b', {}, location.host + '/tv'),
         `. Screens connected: ${sync.tvCount}.`),
+      h('div', { class: 'eyebrow' }, 'Retro ROMs'),
+      h('p', { class: 'dim', style: 'font-size:14px' },
+        'Add games you own at ', h('a', { href: '/roms', style: 'color:inherit' }, h('b', {}, location.host + '/roms')), '.'),
       h('div', { class: 'divider' }),
       h('div', { class: 'eyebrow' }, 'Software'),
       h('p', { class: 'dim', style: 'font-size:14px' }, `Version: ${sync.version || 'unknown'}`),
@@ -364,7 +416,7 @@ function render() {
   document.body.style.overflow = padActive ? 'hidden' : '';
   if (sync.emulator) { mount(root, emulatorScreen()); return; }
   switch (sync.phase) {
-    case 'hub': mount(root, hubScreen()); break;
+    case 'hub': mount(root, hubMode ? hubScreen() : chooseScreen()); break;
     case 'lobby': mount(root, lobbyScreen()); break;
     case 'game': mount(root, gameScreen()); break;
     case 'gameover': mount(root, gameoverScreen()); break;

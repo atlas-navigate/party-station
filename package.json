@@ -8,6 +8,7 @@
     "start": "node server/index.js",
     "simulate": "node scripts/simulate.js",
     "e2e": "node scripts/e2e.js",
+    "e2e:cabinet": "bash scripts/e2e-cabinet.sh",
     "mdns": "bash scripts/dev-mdns.sh"
   },
   "engines": {

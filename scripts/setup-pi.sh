@@ -10,12 +10,16 @@
 #   4. Installs + starts a systemd service on port 80 (auto-restarts, applies updates)
 #   5. Makes the Pi a console: boots straight into a Chromium kiosk showing the
 #      TV view on the HDMI screen (desktop image required; skip with SETUP_KIOSK=0)
+#   6. Installs RetroArch + emulator cores via RetroPie for the retro Cabinet
+#      (real Pi only; skip with SETUP_RETROPIE=0; ROMs are never included)
 set -euo pipefail
 
 REPO="https://github.com/atlas-navigate/party-station.git"
 APP_DIR="${APP_DIR:-/opt/party-station}"
 HOSTNAME_WANTED="party-station"
 RUN_USER="${SUDO_USER:-pi}"
+HOME_DIR="$(getent passwd "$RUN_USER" | cut -d: -f6)"
+HOME_DIR="${HOME_DIR:-/home/$RUN_USER}"
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "Please run with sudo: curl -fsSL .../setup-pi.sh | sudo bash"
@@ -99,8 +103,6 @@ if [ "${SETUP_KIOSK:-1}" != "0" ]; then
 
       KIOSK_CMD="$APP_DIR/scripts/kiosk.sh"
       chmod +x "$KIOSK_CMD"
-      HOME_DIR="$(getent passwd "$RUN_USER" | cut -d: -f6)"
-      HOME_DIR="${HOME_DIR:-/home/$RUN_USER}"
 
       # Hook every session type Raspberry Pi OS ships; kiosk.sh holds a lock
       # so at most one instance runs even if two mechanisms fire.
@@ -139,6 +141,42 @@ EOF
   fi
 fi
 
+# ── RetroPie / RetroArch (the Cabinet) — on by default on a real Pi. ──
+# Skip with SETUP_RETROPIE=0. Installs RetroArch + libretro cores from
+# RetroPie's binary repo (falls back to source builds). No ROMs are ever
+# included — add dumps of games you own at http://party-station.local/roms.
+if [ "${SETUP_RETROPIE:-1}" != "0" ] && grep -qi "raspberry pi" /proc/device-tree/model 2>/dev/null; then
+  echo "==> Setting up RetroArch + emulator cores (the retro Cabinet)…"
+  apt-get install -y -qq dialog unzip >/dev/null 2>&1 || true
+  RP_SETUP="$HOME_DIR/RetroPie-Setup"
+  if [ ! -d "$RP_SETUP/.git" ]; then
+    sudo -u "$RUN_USER" git clone --depth=1 https://github.com/RetroPie/RetroPie-Setup.git "$RP_SETUP"
+  else
+    sudo -u "$RUN_USER" git -C "$RP_SETUP" pull --ff-only >/dev/null 2>&1 || true
+  fi
+  # _auto_ = binary install when RetroPie ships one for this Pi/OS, else a
+  # source build (slow but unattended). Skip anything already installed.
+  for pkg in retroarch lr-mame2003-plus lr-fceumm lr-snes9x lr-genesis-plus-gx lr-pcsx-rearmed; do
+    if [ -d "/opt/retropie/emulators/$pkg" ] || [ -d "/opt/retropie/libretrocores/$pkg" ]; then
+      echo "    $pkg — already installed"
+      continue
+    fi
+    echo "    Installing $pkg… (binaries are quick; source builds can take a while)"
+    if ! "$RP_SETUP/retropie_packages.sh" "$pkg" _auto_ > "/tmp/retropie-$pkg.log" 2>&1; then
+      echo "    ⚠ $pkg failed (see /tmp/retropie-$pkg.log) — install later via $RP_SETUP/retropie_setup.sh"
+    fi
+  done
+  sudo -u "$RUN_USER" mkdir -p \
+    "$HOME_DIR/RetroPie/roms/arcade" "$HOME_DIR/RetroPie/roms/nes" \
+    "$HOME_DIR/RetroPie/roms/snes" "$HOME_DIR/RetroPie/roms/megadrive" \
+    "$HOME_DIR/RetroPie/roms/psx" "$HOME_DIR/RetroPie/roms/incoming" \
+    "$HOME_DIR/RetroPie/BIOS"
+  echo "    Cabinet ready. Add ROMs at http://${HOSTNAME_WANTED}.local/roms"
+  echo "    (or scp them into ~/RetroPie/roms/incoming — they sort themselves)."
+elif [ "${SETUP_RETROPIE:-1}" != "0" ]; then
+  echo "==> Not a Raspberry Pi — skipping RetroArch/RetroPie setup."
+fi
+
 IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 cat <<EOF
 
@@ -147,6 +185,8 @@ cat <<EOF
    Phones:      http://party-station.local   (or http://${IP})
    Big screen:  plug the Pi into the TV — it boots straight into the console
                 (or open http://party-station.local/tv on a smart TV's browser)
+   Retro ROMs:  upload at http://party-station.local/roms, or scp files into
+                ~/RetroPie/roms/incoming — they sort into the right folder
 
    Updates: the station checks GitHub every 15 minutes and installs new
    versions automatically between games. You can also press "Check for

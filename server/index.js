@@ -7,6 +7,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { WebSocketServer } from 'ws';
 import { handleConnection, isIdle, notifyClients } from './lobby.js';
+import * as emulator from './emulator.js';
+import { romsRouter, startIncomingSorter } from './roms.js';
 import * as updater from './updater.js';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -15,6 +17,10 @@ const PORT = Number(process.env.PORT || 8080);
 const app = express();
 app.use(express.static(path.join(ROOT, 'public')));
 app.get('/tv', (_req, res) => res.sendFile(path.join(ROOT, 'public', 'tv.html')));
+app.get('/roms', (_req, res) => res.sendFile(path.join(ROOT, 'public', 'roms.html')));
+app.use('/api/roms', romsRouter({
+  onChange: () => { emulator.scan(true); notifyClients(); },
+}));
 app.get('/api/status', (_req, res) => res.json({
   ok: true,
   version: updater.status.version,
@@ -53,3 +59,4 @@ server.listen(PORT, () => {
 });
 
 updater.init({ isIdle, onStatusChange: notifyClients });
+startIncomingSorter({ onChange: () => { emulator.scan(true); notifyClients(); } });

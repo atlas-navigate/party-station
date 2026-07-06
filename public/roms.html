@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#171a2b">
+  <title>Party Station — ROM Library</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🕹️</text></svg>">
+  <link rel="stylesheet" href="/css/style.css">
+  <style>
+    .drop {
+      border: 3px dashed var(--edge); border-radius: 18px; padding: 34px 16px;
+      text-align: center; cursor: pointer; transition: border-color .15s, background .15s;
+    }
+    .drop.over { border-color: var(--marquee); background: rgba(255, 200, 60, .07); }
+    .drop .big { font-size: 42px; }
+    .rom-row {
+      display: flex; align-items: center; gap: 10px; padding: 9px 12px;
+      background: var(--raised); border-radius: 12px; font-size: 14px;
+    }
+    .rom-row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .rom-row select { max-width: 130px; }
+    .bar { height: 6px; border-radius: 3px; background: var(--edge); overflow: hidden; flex: 1; }
+    .bar > div { height: 100%; width: 0; background: var(--marquee); transition: width .2s; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module">
+    import { h, mount, toast, sheet } from '/js/ui.js';
+
+    const root = document.getElementById('app');
+    let lib = null;              // /api/roms library listing
+    const queue = [];            // { file, system, pct, status: 'wait'|'up'|'done'|'err', err }
+
+    const fmtSize = n => n > 1024 ** 3 ? (n / 1024 ** 3).toFixed(1) + ' GB'
+      : n > 1024 ** 2 ? (n / 1024 ** 2).toFixed(1) + ' MB'
+      : Math.max(1, Math.round(n / 1024)) + ' KB';
+
+    async function refresh() {
+      lib = await (await fetch('/api/roms')).json();
+      render();
+    }
+
+    // Route by extension client-side only to prefill the select; the server
+    // re-validates and does its own routing for system=auto.
+    function guessSystem(name) {
+      const ext = ('.' + name.split('.').pop()).toLowerCase();
+      for (const s of lib.systems) if (s.ext.includes(ext)) return s.id;
+      return null;
+    }
+
+    function enqueue(files) {
+      for (const f of files) {
+        const system = guessSystem(f.name);
+        queue.push({ file: f, system, pct: 0, status: system ? 'wait' : 'err', err: system ? null : 'Unknown file type' });
+      }
+      render();
+      pump();
+    }
+
+    let uploading = false;
+    function pump() {
+      if (uploading) return;
+      const item = queue.find(q => q.status === 'wait');
+      if (!item) { refresh(); return; }
+      uploading = true;
+      item.status = 'up';
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `/api/roms?name=${encodeURIComponent(item.file.name)}&system=${encodeURIComponent(item.system)}`);
+      xhr.upload.onprogress = e => {
+        if (e.lengthComputable) { item.pct = Math.round(e.loaded / e.total * 100); render(); }
+      };
+      xhr.onload = () => {
+        uploading = false;
+        if (xhr.status === 200) { item.status = 'done'; item.pct = 100; }
+        else {
+          item.status = 'err';
+          try { item.err = JSON.parse(xhr.responseText).err; } catch { item.err = 'Upload failed'; }
+        }
+        render();
+        pump();
+      };
+      xhr.onerror = () => { uploading = false; item.status = 'err'; item.err = 'Network error'; render(); pump(); };
+      xhr.send(item.file);
+      render();
+    }
+
+    function retry(item, system) {
+      item.system = system;
+      item.status = 'wait';
+      item.err = null;
+      item.pct = 0;
+      render();
+      pump();
+    }
+
+    function confirmDelete(sys, file) {
+      const s = sheet(`Delete ${file}?`,
+        h('p', { class: 'dim', style: 'margin-bottom:14px' }, 'Removes the ROM file from the Pi.'),
+        h('div', { class: 'row' },
+          h('button', { class: 'tok ghost grow', onclick: () => s.remove() }, 'Keep it'),
+          h('button', {
+            class: 'tok danger grow',
+            onclick: async () => {
+              s.remove();
+              const r = await fetch(`/api/roms/${sys.id}/${encodeURIComponent(file)}`, { method: 'DELETE' });
+              toast(r.ok ? 'Deleted' : 'Delete failed', !r.ok);
+              refresh();
+            },
+          }, 'Delete')));
+    }
+
+    function systemSelect(item) {
+      return h('select', {
+        class: 'field', style: 'padding:6px',
+        onchange: e => retry(item, e.target.value),
+      },
+        !item.system && h('option', { value: '', selected: true, disabled: true }, 'System?'),
+        lib.systems.map(s => h('option', { value: s.id, selected: s.id === item.system }, s.name)));
+    }
+
+    function render() {
+      if (!lib) return;
+      const input = h('input', {
+        type: 'file', multiple: true, style: 'display:none',
+        onchange: e => { enqueue([...e.target.files]); e.target.value = ''; },
+      });
+      const exts = [...new Set(lib.systems.flatMap(s => s.ext))].join(' · ');
+      mount(root, h('div', { class: 'screen', style: 'max-width:640px;margin:0 auto' },
+        h('div', { class: 'topbar' },
+          h('div', {},
+            h('div', { class: 'eyebrow' }, 'Party Station'),
+            h('h1', {}, '🕹️ ROM Library')),
+          h('a', { class: 'tok small', href: '/' }, '← Games')),
+        h('p', { class: 'dim', style: 'font-size:14px;margin-bottom:14px' },
+          'Drop in dumps of games you own — each file lands in the right RetroPie folder automatically and shows up in the Cabinet within a moment.'),
+        h('div', {
+          class: 'drop', onclick: () => input.click(),
+          ondragover: e => { e.preventDefault(); e.currentTarget.classList.add('over'); },
+          ondragleave: e => e.currentTarget.classList.remove('over'),
+          ondrop: e => { e.preventDefault(); e.currentTarget.classList.remove('over'); enqueue([...e.dataTransfer.files]); },
+        },
+          h('div', { class: 'big' }, '⬆️'),
+          h('div', { style: 'font-weight:800;margin:6px 0' }, 'Drop ROM files here'),
+          h('div', { class: 'dim', style: 'font-size:12px' }, exts)),
+        input,
+        queue.length ? h('div', { class: 'stack', style: 'margin-top:14px' }, queue.map(item =>
+          h('div', { class: 'rom-row' },
+            h('span', {}, item.status === 'done' ? '✅' : item.status === 'err' ? '⚠️' : '⏳'),
+            h('span', { class: 'name' }, item.file.name),
+            item.status === 'up' && h('div', { class: 'bar' }, h('div', { style: `width:${item.pct}%` })),
+            item.status === 'err' && h('span', { class: 'dim', style: 'font-size:12px' }, item.err),
+            (item.status === 'err' || item.status === 'wait') && systemSelect(item),
+            item.status === 'done' && h('span', { class: 'dim', style: 'font-size:12px' },
+              lib.systems.find(s => s.id === item.system)?.name || item.system)))) : null,
+        h('div', { class: 'divider' }),
+        lib.systems.filter(s => s.files.length).map(sys => h('div', { style: 'margin-bottom:14px' },
+          h('div', { class: 'eyebrow', style: 'margin-bottom:8px' }, `${sys.icon} ${sys.name} (${sys.files.length})`),
+          h('div', { class: 'stack', style: 'gap:6px' }, sys.files.map(f =>
+            h('div', { class: 'rom-row' },
+              h('span', { class: 'name' }, f.file),
+              h('span', { class: 'dim', style: 'font-size:12px' }, fmtSize(f.size)),
+              h('button', { class: 'tok small danger', onclick: () => confirmDelete(sys, f.file) }, '🗑')))))),
+        lib.systems.every(s => !s.files.length)
+          && h('p', { class: 'dim center', style: 'font-size:14px' }, 'No ROMs yet — drop some in above.'),
+        h('div', { class: 'banner', style: 'font-size:12px;margin-top:10px' },
+          'Only add games you legally own. Arcade .zip files must match the MAME 2003-Plus (0.78) ROM set. ',
+          'PlayStation games may also need a BIOS file in ~/RetroPie/BIOS on the Pi.'),
+      ));
+    }
+
+    refresh();
+  </script>
+</body>
+</html>

@@ -146,6 +146,55 @@ ok('cleanup done');
 // Cabinet (RetroArch) flow — runs only when the server sees an emulator
 // setup (real, or the fake one the test harness fabricates via env vars).
 if (alice.sync.emu?.available) {
+  // ROM upload API: extension routing, override, listing, delete, and the
+  // scp "incoming" folder sorter.
+  const base = `http://127.0.0.1:${PORT}`;
+  const romsDir = process.env.ROMS_DIR;
+  const upload = (name, system = 'auto') =>
+    fetch(`${base}/api/roms?name=${encodeURIComponent(name)}&system=${system}`,
+      { method: 'POST', body: 'fake-rom-bytes' });
+
+  let r = await (await upload('Super Test (USA).sfc')).json();
+  if (r.system !== 'snes') throw new Error('.sfc did not route to snes: ' + JSON.stringify(r));
+  r = await (await upload('coinop.zip')).json();
+  if (r.system !== 'arcade') throw new Error('.zip did not route to arcade');
+  r = await (await upload('console game.zip', 'snes')).json();
+  if (r.system !== 'snes') throw new Error('explicit system override ignored');
+  r = await (await upload('mystery.xyz')).json();
+  if (!r.err) throw new Error('unknown extension should be rejected');
+  const lib = await (await fetch(`${base}/api/roms`)).json();
+  const snes = lib.systems.find(s => s.id === 'snes');
+  if (!snes || !snes.files.some(f => f.file === 'Super Test (USA).sfc')) {
+    throw new Error('uploaded ROM missing from library listing');
+  }
+  ok('ROM upload routes by extension (override + rejects unknowns)');
+
+  if (romsDir) {
+    const { default: fs } = await import('fs');
+    const { default: path } = await import('path');
+    const inc = path.join(romsDir, 'incoming');
+    fs.mkdirSync(inc, { recursive: true });
+    fs.writeFileSync(path.join(inc, 'Dropped Game.nes'), 'fake-nes');
+    const deadline2 = Date.now() + 15000;
+    let sorted = false;
+    while (Date.now() < deadline2) {
+      if (fs.existsSync(path.join(romsDir, 'nes', 'Dropped Game.nes'))) { sorted = true; break; }
+      await sleep(200);
+    }
+    if (!sorted) throw new Error('incoming/ file was not sorted into nes/');
+    ok('scp incoming folder sorts ROMs automatically');
+  }
+
+  for (const [sys, file] of [['snes', 'Super Test (USA).sfc'], ['arcade', 'coinop.zip'],
+                             ['snes', 'console game.zip'], ['nes', 'Dropped Game.nes']]) {
+    await fetch(`${base}/api/roms/${sys}/${encodeURIComponent(file)}`, { method: 'DELETE' });
+  }
+  const lib2 = await (await fetch(`${base}/api/roms`)).json();
+  if (lib2.systems.some(s => s.files.some(f => f.file.includes('Super Test')))) {
+    throw new Error('delete did not remove the ROM');
+  }
+  ok('ROM delete works');
+
   const sys = alice.sync.emu.systems[0];
   alice.send({ t: 'emuLaunch', system: sys.id, file: sys.games[0].file });
   await waitFor(alice, s => !!s.emulator);

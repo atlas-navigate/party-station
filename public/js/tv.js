@@ -12,6 +12,8 @@ const modules = {};
 let scene = null;          // { gameId, key, api } for mounted 3D scenes
 let relaySim = null;
 let hubCursor = 0;
+let tvMode = null;         // landing choice: null (asking) | 'party' | 'retro'
+let chooseIdx = 0;         // focused tile on the landing chooser
 const menus = new Map();   // pad index -> {seat, stage, idx, spec}
 const peeked = new Set();  // seat indexes currently revealing their hand (Y)
 const peekTimers = new Map();
@@ -65,16 +67,32 @@ function handlePad(pad, btn, isRepeat) {
 }
 
 function hubList() {
-  const ents = sync.games.map(g => ({ kind: 'game', g }));
-  for (const s of (sync.emu?.systems || [])) {
-    for (const gm of s.games) {
-      ents.push({ kind: 'emu', system: s.id, sysName: s.name, icon: s.icon, file: gm.file, title: gm.title });
+  if (tvMode === 'retro') {
+    const ents = [];
+    for (const s of (sync.emu?.systems || [])) {
+      for (const gm of s.games) {
+        ents.push({ kind: 'emu', system: s.id, sysName: s.name, icon: s.icon, file: gm.file, title: gm.title });
+      }
     }
+    return ents;
   }
-  return ents;
+  if (tvMode === 'party') return sync.games.map(g => ({ kind: 'game', g }));
+  return [];
 }
 
 function padHub(pad, btn) {
+  // Landing chooser: pick between party games and the retro cabinet.
+  if (tvMode === null) {
+    if (btn === 'left' || btn === 'up') chooseIdx = 0;
+    if (btn === 'right' || btn === 'down') chooseIdx = 1;
+    if (btn === 'a' || btn === 'start' || btn === 'x') {
+      tvMode = chooseIdx === 1 ? 'retro' : 'party';
+      hubCursor = 0;
+    }
+    render();
+    return;
+  }
+  if (btn === 'b') { tvMode = null; render(); return; }
   const list = hubList();
   const cols = 5;
   if (btn === 'left') hubCursor = Math.max(0, hubCursor - 1);
@@ -221,6 +239,8 @@ function disposeScene() {
 
 function hubScreen() {
   disposeScene();
+  if (tvMode === null) return chooseScreen();
+  if (tvMode === 'retro') return retroHubScreen();
   const list = hubList();
   const cats = [['cards', 'CARD GAMES'], ['board', 'BOARD GAMES'], ['arcade', 'ARCADE']];
   return h('div', { class: 'tv-stage' },
@@ -229,7 +249,7 @@ function hubScreen() {
       cats.map(([c, label]) => h('div', { style: 'margin-bottom:16px' },
         h('div', { class: 'eyebrow', style: 'font-size:14px;margin-bottom:8px' }, label),
         h('div', { class: 'row wrap', style: 'gap:10px' },
-          list.filter(e => e.kind === 'game' && e.g.category === c).map(e => {
+          list.filter(e => e.g.category === c).map(e => {
             const g = e.g;
             const focused = list.indexOf(e) === hubCursor;
             return h('div', {
@@ -241,26 +261,74 @@ function hubScreen() {
                 h('div', { class: 'g-name', style: 'font-size:16px' }, g.name, sync.saves[g.id] ? ' 💾' : ''),
                 h('div', { class: 'g-sub' }, `${g.minPlayers === g.maxPlayers ? g.minPlayers : g.minPlayers + '–' + g.maxPlayers} players`)));
           })))),
-      sync.emu?.available && h('div', { style: 'margin-bottom:14px' },
-        h('div', { class: 'eyebrow', style: 'font-size:14px;margin-bottom:8px' }, '🕹️ CABINET (RETROARCH)'),
-        h('div', { class: 'row wrap', style: 'gap:10px' },
-          list.filter(e => e.kind === 'emu').map(e => {
-            const focused = list.indexOf(e) === hubCursor;
-            return h('div', {
-              class: 'game-tile cat-arcade' + (focused ? ' tv-focus' : ''),
-              style: 'min-height:0;padding:8px 14px;flex-direction:row;align-items:center;gap:10px;cursor:default',
-            },
-              h('span', { style: 'font-size:22px' }, e.icon),
-              h('div', {},
-                h('div', { class: 'g-name', style: 'font-size:15px' }, e.title),
-                h('div', { class: 'g-sub' }, e.sysName)));
-          }))),
     ),
     h('div', { class: 'tv-seats', style: 'margin:6px 0' },
       sync.players.length
         ? sync.players.map(p => h('div', { class: 'chip' }, h('span', { class: 'dot' }, p.name[0]?.toUpperCase()), p.name))
         : h('span', { class: 'dim', style: 'font-size:18px' }, 'No players yet — join from a phone or press a button on a paired controller.')),
-    hintBar([['🎮 A', 'open game'], ['🎮 X', 'resume save'], ['📱', `phones: http://${location.host}`]]),
+    hintBar([['🎮 A', 'open game'], ['🎮 X', 'resume save'], ['🎮 B', 'retro ⇄ party'], ['📱', `phones: http://${location.host}`]]),
+  );
+}
+
+// Landing chooser: the console's first screen — retro classics or party games?
+function chooseScreen() {
+  const emuGames = (sync.emu?.systems || []).reduce((n, s) => n + s.games.length, 0);
+  const tiles = [
+    { icon: '🃏', name: 'Party Games', sub: 'Cards · Board · Arcade — phones and controllers', cls: 'cat-cards', mode: 'party' },
+    {
+      icon: '🕹️', name: 'Retro Games', cls: 'cat-arcade', mode: 'retro',
+      sub: sync.emu?.available ? `${emuGames} classics on the emulator` : `Add ROMs at http://${location.host}/roms`,
+    },
+  ];
+  return h('div', { class: 'tv-stage' },
+    h('div', { class: 'tv-top' }, wordmark(44), urlBox()),
+    h('div', { class: 'tv-main' },
+      h('div', { class: 'center' },
+        h('div', { class: 'tv-big', style: 'font-size:44px;margin-bottom:26px' }, 'What are we playing?'),
+        h('div', { class: 'row', style: 'gap:26px;justify-content:center' },
+          tiles.map((t2, i) => h('div', {
+            class: `game-tile ${t2.cls}` + (chooseIdx === i ? ' tv-focus' : ''),
+            style: 'width:320px;min-height:170px;cursor:default',
+            onclick: () => { tvMode = t2.mode; hubCursor = 0; render(); },
+          },
+            h('span', { style: 'font-size:52px' }, t2.icon),
+            h('div', { class: 'g-name', style: 'font-size:26px' }, t2.name),
+            h('div', { class: 'g-sub', style: 'font-size:14px' }, t2.sub)))))),
+    hintBar([['🎮 ◀▶', 'choose'], ['🎮 A', 'select'], ['📱', `phones: http://${location.host}`]]),
+  );
+}
+
+function retroHubScreen() {
+  const list = hubList();
+  const bySystem = new Map();
+  for (const e of list) {
+    if (!bySystem.has(e.sysName)) bySystem.set(e.sysName, []);
+    bySystem.get(e.sysName).push(e);
+  }
+  return h('div', { class: 'tv-stage' },
+    h('div', { class: 'tv-top' }, wordmark(44), urlBox()),
+    list.length
+      ? h('div', { style: 'flex:1;overflow:hidden' },
+        [...bySystem.entries()].map(([sysName, ents]) => h('div', { style: 'margin-bottom:14px' },
+          h('div', { class: 'eyebrow', style: 'font-size:14px;margin-bottom:8px' }, `${ents[0].icon} ${sysName.toUpperCase()}`),
+          h('div', { class: 'row wrap', style: 'gap:10px' },
+            ents.map(e => h('div', {
+              class: 'game-tile cat-arcade' + (list.indexOf(e) === hubCursor ? ' tv-focus' : ''),
+              style: 'min-height:0;padding:8px 14px;flex-direction:row;align-items:center;gap:10px;cursor:default',
+            },
+              h('span', { style: 'font-size:22px' }, e.icon),
+              h('div', {},
+                h('div', { class: 'g-name', style: 'font-size:15px' }, e.title),
+                h('div', { class: 'g-sub' }, e.sysName))))))))
+      : h('div', { class: 'tv-main' },
+        h('div', { class: 'center' },
+          h('div', { style: 'font-size:90px' }, '🕹️'),
+          h('div', { class: 'tv-big', style: 'font-size:40px' }, 'No retro games yet'),
+          h('p', { class: 'dim', style: 'font-size:22px;margin-top:12px' },
+            `Add ROMs of games you own at http://${location.host}/roms`),
+          h('p', { class: 'dim', style: 'font-size:18px' },
+            `or scp them into ~/RetroPie/roms/incoming — they sort themselves.`))),
+    hintBar([['🎮 A', 'play'], ['🎮 B', 'back'], ['📱', `phones: http://${location.host}`]]),
   );
 }
 
@@ -413,6 +481,8 @@ function emulatorScreen() {
 function render() {
   if (!sync) return;
   if (sync.emulator) { menus.clear(); mount(root, emulatorScreen()); return; }
+  // A session started from a phone answers the landing prompt implicitly.
+  if (tvMode === null && sync.phase !== 'hub') tvMode = 'party';
   if (sync.phase === 'game') refreshMenus(); else menus.clear();
   switch (sync.phase) {
     case 'hub': mount(root, hubScreen()); break;

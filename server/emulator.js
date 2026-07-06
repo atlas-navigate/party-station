@@ -7,7 +7,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-const ROMS_DIR = process.env.ROMS_DIR || path.join(os.homedir(), 'RetroPie', 'roms');
+export const ROMS_DIR = process.env.ROMS_DIR || path.join(os.homedir(), 'RetroPie', 'roms');
 const LIBRETRO_DIRS = [
   process.env.LIBRETRO_DIR,
   '/opt/retropie/libretrocores',
@@ -17,7 +17,7 @@ const LIBRETRO_DIRS = [
   path.join(os.homedir(), '.config/retroarch/cores'),
 ].filter(Boolean);
 
-const SYSTEMS = [
+export const SYSTEMS = [
   { id: 'arcade', name: 'Arcade (MAME)', icon: '🕹️', cores: ['mame2003_plus_libretro.so', 'fbneo_libretro.so', 'mame2003_libretro.so'], ext: ['.zip'] },
   { id: 'mame-libretro', name: 'Arcade (MAME)', icon: '🕹️', cores: ['mame2003_plus_libretro.so', 'mame2003_libretro.so'], ext: ['.zip'] },
   { id: 'fba', name: 'Arcade (FBNeo)', icon: '🕹️', cores: ['fbneo_libretro.so'], ext: ['.zip'] },

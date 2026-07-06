@@ -23,8 +23,9 @@ repo is safe to share and host.
 ## How it plays
 
 - **The TV is the console screen.** Open `http://party-station.local/tv` on
-  the TV (or let the kiosk do it) — the hub, lobbies, and every game render
-  there in 3D (three.js, bundled locally, works fully offline).
+  the TV (or let the kiosk do it). It lands on a chooser — **🃏 Party Games
+  or 🕹️ Retro Games** — then the hub, lobbies, and every game render there
+  in 3D (three.js, bundled locally, works fully offline).
 - **Phones are controllers with a private screen.** Your hand of cards, your
   bets, your secret role — those live on your phone, Wii-U-gamepad style.
   In arcade games the phone becomes a touch gamepad.
@@ -70,18 +71,24 @@ you want the Pi itself to drive the TV), get it on your network, then:
 curl -fsSL https://raw.githubusercontent.com/atlas-navigate/party-station/main/scripts/setup-pi.sh | sudo bash
 ```
 
-That sets the hostname to `party-station` (mDNS via avahi →
-`party-station.local`), installs Node.js, installs the app under
-`/opt/party-station`, starts a systemd service on port 80 — and, on the
-desktop image, **turns the Pi into a console**: it auto-logs into the
-desktop, disables screen blanking, and boots straight into Chromium
-fullscreen on the TV view (`http://localhost/tv`). Plug the HDMI cable into
-a TV and it just shows the console; the kiosk waits for the server, and
-relaunches the browser if it ever exits. Don't want that (e.g. the Pi is
-also your desktop machine)? Run the setup with `SETUP_KIOSK=0`:
+That one command sets up the whole console, no menus to click through:
+
+- hostname `party-station` (mDNS via avahi → `party-station.local`),
+  Node.js, the app under `/opt/party-station`, a systemd service on port 80;
+- on the desktop image, the **TV kiosk**: auto-login, no screen blanking,
+  Chromium fullscreen on the TV view at boot. Plug the HDMI cable into a TV
+  and it shows the console; the kiosk waits for the server and relaunches
+  the browser if it ever exits. The TV opens on a chooser — **🃏 Party
+  Games or 🕹️ Retro Games** — navigable from a controller;
+- **RetroArch + emulator cores** (arcade, NES, SNES, Genesis, PS1) via
+  RetroPie's binary packages, so retro ROMs play out of the box. ROMs are
+  **never** included — add dumps of games you own afterwards (next section).
+
+Opt out of pieces with env vars — e.g. the Pi is also your desktop machine,
+or you don't want emulators:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/atlas-navigate/party-station/main/scripts/setup-pi.sh | sudo SETUP_KIOSK=0 bash
+curl -fsSL https://raw.githubusercontent.com/atlas-navigate/party-station/main/scripts/setup-pi.sh | sudo SETUP_KIOSK=0 SETUP_RETROPIE=0 bash
 ```
 
 On Raspberry Pi OS **Lite** there's no browser to run, so the kiosk is
@@ -98,43 +105,40 @@ Android phones resolve `.local` names in modern versions; if a device can't,
 use the Pi's IP address (shown in the app's Settings sheet and in
 `journalctl -u party-station`).
 
-## The Cabinet: real retro games via RetroPie
+## Retro games: adding ROMs
 
-Party Station can act as the frontend for RetroArch, so genuine classics
-(the games you actually meant — NBA Jam, Mortal Kombat II, …) run on the
-same console. Setup on the Pi:
+The setup script already installed RetroArch and the cores (arcade/MAME,
+NES, SNES, Genesis, PS1) — Party Station is the frontend, no
+EmulationStation needed. What it can't do is supply games: **no ROMs ship
+with this repo, and none ever will.** Add dumps of games you legally own,
+whichever way is easiest:
 
-```bash
-sudo apt install -y git dialog unzip
-cd ~ && git clone --depth=1 https://github.com/RetroPie/RetroPie-Setup.git
-cd RetroPie-Setup && sudo ./retropie_setup.sh
-```
+- **Browser (easiest):** open `http://party-station.local/roms` from any
+  laptop or phone and drag files in. Each file is routed to the right
+  system folder by its extension (`.sfc` → SNES, `.zip` → arcade, `.chd` →
+  PS1, …), with an override dropdown for the ambiguous ones.
+- **scp, one folder for everything:** copy files into
+  `~/RetroPie/roms/incoming/` — the station watches it, waits for the
+  transfer to finish, and sorts each file into place (it even keeps PS1
+  `.cue`/`.bin` pairs together):
 
-In the menu: **Manage packages → Manage core packages → install `retroarch`**,
-then under *Manage main packages* install the cores you want:
-`lr-mame2003-plus` (arcade), `lr-snes9x`, `lr-genesis-plus-gx`,
-`lr-pcsx-rearmed` (PS1), `lr-fceumm` (NES). Skip EmulationStation —
-Party Station is the frontend.
+  ```bash
+  scp *.zip *.sfc pi@party-station.local:RetroPie/roms/incoming/
+  ```
+- **Manually:** the classic `~/RetroPie/roms/<system>/` folders still work.
 
-Then drop ROM files for **games you legally own** into the standard folders:
+Either way the games appear under **🕹️ Retro Games** on the TV and phones
+within a moment — no restart. Launching one starts RetroArch fullscreen on
+the Pi's HDMI output; Bluetooth controllers work in it natively (that's
+their home turf). Exit with **Select+Start** and Party Station takes the
+screen back — phones also get a force-quit button just in case.
 
-```
-~/RetroPie/roms/arcade/     (.zip — must match the mame2003-plus ROM set!)
-~/RetroPie/roms/snes/       (.sfc/.smc)
-~/RetroPie/roms/psx/        (.cue/.chd/.pbp)
-~/RetroPie/roms/megadrive/  (.md/.gen/.bin)
-```
-
-Within a minute a **🕹️ Cabinet** category appears in the hub (phones and
-TV). Launching a title starts RetroArch fullscreen on the Pi's HDMI output;
-Bluetooth controllers work in it natively (that's their home turf). Exit
-with **Select+Start** and Party Station takes the screen back — phones also
-get a force-quit button just in case. No ROMs ship with this repo, and none
-ever will.
-
-Per-title honesty for a Pi 4: NBA Jam and MK2 run full speed under
-`lr-mame2003-plus`; NFL Blitz's 3dfx arcade board is NOT playable under MAME
-on a Pi — use the PS1 port with `lr-pcsx-rearmed` instead.
+Fine print: arcade `.zip`s must match the MAME 2003-Plus (0.78) ROM set;
+PS1 games may need a BIOS file in `~/RetroPie/BIOS`. Per-title honesty for
+a Pi 4: NBA Jam and MK2 run full speed under `lr-mame2003-plus`; NFL
+Blitz's 3dfx arcade board is NOT playable under MAME on a Pi — use the PS1
+port with `lr-pcsx-rearmed` instead. Want more systems (N64, GBA)? Install
+extra cores via `~/RetroPie-Setup/retropie_setup.sh`.
 
 ## Deploying updates
 
