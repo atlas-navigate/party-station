@@ -179,6 +179,15 @@ PORT=8090 node server/index.js &   # then, in another shell:
 PORT=8090 npm run e2e              # full websocket join/play/save/resume test
 ```
 
+Only the Pi answers to `party-station.local` (setup renames it); a dev box
+advertises its own hostname, so the server banner prints the name that will
+actually resolve (e.g. `http://<your-host>.local:8080`). To test with the
+real console name from phones, alias it while the server runs:
+
+```bash
+npm run mdns         # advertises party-station.local → this machine (Ctrl-C to stop)
+```
+
 Plain Node + `express` + `ws` on the server, vanilla ES modules in the
 browser, no build step. `server/lobby.js` is the heart: one lobby/session at a
 time, seat management, bot scheduling, saves, reconnects.

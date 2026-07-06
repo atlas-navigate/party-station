@@ -42,8 +42,12 @@ wss.on('connection', ws => {
 server.listen(PORT, () => {
   const nets = Object.values(os.networkInterfaces()).flat()
     .filter(n => n && n.family === 'IPv4' && !n.internal).map(n => n.address);
+  // mDNS advertises the machine's real hostname — only the Pi is actually
+  // named "party-station". On a dev box, print the name that will resolve
+  // (scripts/dev-mdns.sh can alias party-station.local for testing).
+  const mdnsName = `${os.hostname().toLowerCase()}.local`;
   console.log(`Party Station on port ${PORT}`);
-  console.log(`  Players: http://party-station.local${PORT === 80 ? '' : ':' + PORT}`);
+  console.log(`  Players: http://${mdnsName}${PORT === 80 ? '' : ':' + PORT}`);
   for (const ip of nets) console.log(`  (or http://${ip}${PORT === 80 ? '' : ':' + PORT})`);
   console.log(`  TV:      add /tv to either URL`);
 });
