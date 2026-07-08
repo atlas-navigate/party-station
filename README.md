@@ -32,7 +32,7 @@ repo is safe to share and host.
 - **Bluetooth controllers work everywhere.** Pair any standard controller
   with the Pi (see below), press any button, and you're a player. Menus for
   your turn pop up on the TV: **A** choose · **B** back · **X** start/resume ·
-  **Y** peek at your hand · **Start** pause (host). One honest physics note:
+  **Y** peek at your hand · **Start** pause / exit. One honest physics note:
   a single shared screen can't keep card hands truly secret — controller
   players "peek" their fanned hand on the TV for a few seconds, so deal
   phones to the poker sharks and pads to everyone else.
@@ -40,8 +40,13 @@ repo is safe to share and host.
   If someone's phone dies mid-game, the host can hand their seat to a bot —
   and anyone can take over a bot seat later.
 - **Auto-save.** Turn-based games save after every move. Leave mid-game
-  ("Save & exit") and a **SAVED** badge appears on the game tile; resume
-  whenever — returning players are matched by name, missing ones become bots.
+  and a **SAVED** badge appears on the game tile; resume whenever —
+  returning players are matched by name, missing ones become bots.
+- **Every game can be exited mid-play, from any player's device.** On a
+  phone: the **💾 Exit** button (turn-based) or the **✕** on the touch
+  gamepad (arcade). On a controller: **Start** opens the pause menu with
+  **Save & exit** (turn-based) or **End game** (arcade). Turn-based exits
+  auto-save; arcade matches just end.
 - **Reconnect-proof.** Phones that lock or drop Wi-Fi re-join their seat
   automatically; controller players survive a TV reload.
 
@@ -114,6 +119,24 @@ TV, Fire stick, or a laptop plugged into the TV instead.
 Android phones resolve `.local` names in modern versions; if a device can't,
 use the Pi's IP address (shown in the app's Settings sheet and in
 `journalctl -u party-station`).
+
+## Troubleshooting from a keyboard
+
+Plug any keyboard into the Pi:
+
+- **Ctrl+Alt+Q** — exit the console: the kiosk closes Chromium and *stays*
+  closed (no auto-relaunch), leaving you on the Pi desktop. Get the console
+  back by typing `party-station-kiosk` in any terminal — it also works over
+  SSH or from a virtual terminal (it finds the TV session itself).
+- **Ctrl+Alt+R** — reload the TV page in place (handy after an update or if
+  a scene wedges).
+- **Ctrl+Alt+F1…F6** — standard Linux virtual terminals still work for a
+  login shell *without* leaving the kiosk; switch back to the desktop's VT
+  to return to the console.
+
+The game server itself is a systemd service, so from that terminal the
+usual tools apply: `journalctl -u party-station -f` for logs,
+`sudo systemctl restart party-station` to bounce it.
 
 ## Retro games: adding ROMs
 

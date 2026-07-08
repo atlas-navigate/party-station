@@ -128,6 +128,16 @@ if [ "${SETUP_KIOSK:-1}" != "0" ]; then
       KIOSK_CMD="$APP_DIR/scripts/kiosk.sh"
       chmod +x "$KIOSK_CMD"
 
+      # Terminal command to re-enter the console after a Ctrl+Alt+Q exit
+      # (works from the desktop, a virtual terminal, or SSH).
+      cat > /usr/local/bin/party-station-kiosk <<EOF
+#!/usr/bin/env bash
+# Relaunch the Party Station TV kiosk (exit it with Ctrl+Alt+Q on the TV).
+[ "\$(id -u)" = "0" ] && exec sudo -u ${RUN_USER} "$KIOSK_CMD" "\$@"
+exec "$KIOSK_CMD" "\$@"
+EOF
+      chmod +x /usr/local/bin/party-station-kiosk
+
       # Hook every session type Raspberry Pi OS ships; kiosk.sh holds a lock
       # so at most one instance runs even if two mechanisms fire.
       AUTOSTART_DIR="$HOME_DIR/.config/autostart"

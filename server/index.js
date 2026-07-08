@@ -1,6 +1,7 @@
 // Party Station — local party game server.
 // Serves the player app (/) and TV app (/tv), and speaks WebSocket to both.
 import express from 'express';
+import fs from 'fs';
 import http from 'http';
 import os from 'os';
 import path from 'path';
@@ -21,6 +22,20 @@ app.get('/roms', (_req, res) => res.sendFile(path.join(ROOT, 'public', 'roms.htm
 app.use('/api/roms', romsRouter({
   onChange: () => { emulator.scan(true); notifyClients(); },
 }));
+// Ctrl+Alt+Q on the TV (attached keyboard) lands here: flag the kiosk
+// launcher (scripts/kiosk.sh watches for this file) to close Chromium and
+// stop relaunching, dropping to the Pi desktop for troubleshooting.
+app.post('/api/kiosk/exit', (_req, res) => {
+  const dir = path.join(os.homedir(), '.config', 'party-station-kiosk');
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'stop'), new Date().toISOString());
+    console.log('kiosk: exit requested from the TV keyboard');
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ ok: false, err: e.message });
+  }
+});
 app.get('/api/status', (_req, res) => res.json({
   ok: true,
   version: updater.status.version,

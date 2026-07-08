@@ -431,7 +431,10 @@ function onPlayerMsg(p, m) {
     }
     case 'quitGame': {
       if ((phase !== 'game' && phase !== 'gameover') || !session) break;
-      if (p.id !== hostPid() && phase === 'game') break;
+      // Any seated player may end the game — pads and phones alike; a stuck
+      // table shouldn't depend on one person's device. Spectators may not.
+      const seated = session.seats.some(s => !s.bot && s.pid === p.id);
+      if (phase === 'game' && !seated) break;
       if (phase === 'game' && session.mode === 'server') autosave(); // resumable later
       returnToHub(); break;
     }

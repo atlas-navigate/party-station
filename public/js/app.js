@@ -329,7 +329,7 @@ function gameScreen() {
       h('div', { class: 'row' }, h('span', { style: 'font-size:22px' }, g.icon), h('h2', {}, g.name)),
       h('div', { class: 'row' },
         G.yourSeat < 0 && h('span', { class: 'dim', style: 'font-size:13px' }, 'spectating'),
-        G.youAreHost && h('button', {
+        (G.yourSeat >= 0 || G.youAreHost) && h('button', {
           class: 'tok small ghost',
           onclick: () => confirmQuit(),
         }, '💾 Exit'),
@@ -359,10 +359,20 @@ function disconnectedBanner(G) {
 
 function confirmQuit() {
   const s = sheet('Leave this game?',
-    h('p', { class: 'dim', style: 'margin-bottom:14px' }, 'Progress is saved automatically — you can resume from the game screen later.'),
+    h('p', { class: 'dim', style: 'margin-bottom:14px' }, 'This ends the game for the whole table. Progress is saved automatically — resume from the game tile later.'),
     h('div', { class: 'row' },
       h('button', { class: 'tok ghost grow', onclick: () => s.remove() }, 'Keep playing'),
       h('button', { class: 'tok danger grow', onclick: () => { net.send({ t: 'quitGame' }); s.remove(); } }, 'Save & exit'),
+    ));
+}
+
+// Arcade (relay) games have no saves — quitting just ends the match.
+function confirmQuitRelay() {
+  const s = sheet('End this arcade game?',
+    h('p', { class: 'dim', style: 'margin-bottom:14px' }, 'This ends the match for everyone — arcade games aren’t saved.'),
+    h('div', { class: 'row' },
+      h('button', { class: 'tok ghost grow', onclick: () => s.remove() }, 'Keep playing'),
+      h('button', { class: 'tok danger grow', onclick: () => { net.send({ t: 'quitGame' }); s.remove(); } }, 'End game'),
     ));
 }
 
@@ -383,6 +393,12 @@ function padScreen(mod, g, G) {
       h('span', { class: 'banner', style: 'font-size:14px' }, `${g.icon} ${G.seats[G.yourSeat].name}`),
       ' ',
       h('span', { id: 'relay-score', class: 'banner', style: 'font-size:14px' }, lastRelayScore || ''),
+      ' ',
+      h('button', {
+        class: 'tok small danger', style: 'vertical-align:middle',
+        onclick: () => confirmQuitRelay(),
+        'aria-label': 'End game',
+      }, '✕'),
     ),
     el);
 }

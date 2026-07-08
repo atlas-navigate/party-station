@@ -37,6 +37,23 @@ const pads = createPads({
 const padMsg = (pad, m) => net.send({ t: 'padMsg', pad, m });
 const padAct = (pad, a) => padMsg(pad, { t: 'act', a });
 
+// Troubleshooting from a keyboard plugged into the Pi (the kiosk has no
+// window chrome): Ctrl+Alt+Q exits the kiosk to the desktop — the server
+// flags scripts/kiosk.sh, which closes Chromium and stops relaunching.
+// Ctrl+Alt+R reloads the TV page. Re-enter with `party-station-kiosk`.
+window.addEventListener('keydown', e => {
+  if (!e.ctrlKey || !e.altKey) return;
+  const k = e.key.toLowerCase();
+  if (k === 'q') {
+    e.preventDefault();
+    toast('👋 Exiting the kiosk — run party-station-kiosk in a terminal to come back');
+    fetch('/api/kiosk/exit', { method: 'POST' }).catch(() => {});
+  } else if (k === 'r') {
+    e.preventDefault();
+    location.reload();
+  }
+});
+
 async function loadModule(id) {
   if (!modules[id]) {
     try { modules[id] = await import(`./games/${id}.js`); }
@@ -117,17 +134,35 @@ function padLobby(pad, btn, info) {
   if (btn === 'x' && info.joined && !info.isHost) padMsg(pad, { t: 'start' }); // ignored server-side unless host
 }
 
+// Any seated player can pause and exit — a stuck game shouldn't need the
+// host's device. Turn-based games auto-save; arcade matches just end.
+function pauseMenuSpec(mode) {
+  return {
+    title: 'Pause', sticky: true, pause: true, items: [
+      mode === 'relay'
+        ? { label: '⛔ End game for everyone', raw: { t: 'quitGame' } }
+        : { label: '💾 Save & exit to hub', raw: { t: 'quitGame' } },
+      { label: 'Keep playing', close: true },
+    ],
+  };
+}
+
 function padGame(pad, btn, info, isRepeat) {
   const G = sync.game;
-  if (G.mode === 'relay') return; // arcade sims poll pads directly
+  if (G.mode === 'relay') {
+    // Arcade sims poll pads directly — Start (unused by the sims) pauses;
+    // while this pad's menu is open the sim ignores it (see padDown).
+    const menu = menus.get(pad);
+    if (menu) menuNav(pad, menu, btn, isRepeat);
+    else if (btn === 'start' && !isRepeat && info.seat >= 0) {
+      openMenu(pad, info.seat, pauseMenuSpec('relay'));
+    }
+    render();
+    return;
+  }
   if (btn === 'y' && !isRepeat && info.seat >= 0) { togglePeek(info.seat); return; }
-  if (btn === 'start' && !isRepeat && info.isHost) {
-    openMenu(pad, info.seat, {
-      title: 'Pause', items: [
-        { label: '💾 Save & exit to hub', action: null, raw: { t: 'quitGame' } },
-        { label: 'Keep playing', close: true },
-      ],
-    });
+  if (btn === 'start' && !isRepeat && info.seat >= 0) {
+    openMenu(pad, info.seat, pauseMenuSpec('server'));
     render();
     return;
   }
@@ -136,6 +171,12 @@ function padGame(pad, btn, info, isRepeat) {
     if (info.awaited) { buildActionMenu(pad, info); render(); }
     return;
   }
+  menuNav(pad, menu, btn, isRepeat);
+  focusScene(menus.get(pad));
+  render();
+}
+
+function menuNav(pad, menu, btn, isRepeat) {
   const items = menu.spec.items.filter(i => !i.hidden);
   if (btn === 'up') menu.idx = (menu.idx + items.length - 1) % items.length;
   if (btn === 'down') menu.idx = (menu.idx + 1) % items.length;
@@ -153,8 +194,6 @@ function padGame(pad, btn, info, isRepeat) {
       menus.delete(pad);
     }
   }
-  focusScene(menu);
-  render();
 }
 
 function togglePeek(seat) {
@@ -196,14 +235,23 @@ function focusScene(menu) {
 
 // Refresh open menus when new state arrives (choices may have changed).
 function refreshMenus() {
-  if (sync.phase !== 'game' || sync.game.mode !== 'server') { menus.clear(); return; }
+  if (sync.phase !== 'game') { menus.clear(); return; }
+  if (sync.game.mode !== 'server') {
+    // Relay: only pause menus exist — keep them while their pad is around.
+    for (const pad of [...menus.keys()]) {
+      if (!myPadInfo(pad)) menus.delete(pad);
+    }
+    return;
+  }
   for (const [pad, menu] of [...menus.entries()]) {
     const info = myPadInfo(pad);
     if (!info || info.seat !== menu.seat || (!info.awaited && !menu.spec.sticky)) {
       menus.delete(pad);
       continue;
     }
-    rebuildMenu(pad, menu);
+    // Pause menus aren't derived from game state — never rebuild them into
+    // an action menu underneath the player.
+    if (!menu.spec.pause) rebuildMenu(pad, menu);
   }
   // Auto-open menus for pad players whose turn just arrived.
   for (const pad of Object.keys(sync.pads || {})) {
@@ -395,7 +443,11 @@ function gameScreen() {
         if (mod.tv?.start && scene?.key === key) {
           relaySim = mod.tv.start(holder, {
             seats: G.seats, options: G.options || {},
-            padDown: (seat, k2) => padSeats[seat] !== undefined && pads.isDown(padSeats[seat], k2),
+            // A pad with its pause menu open is invisible to the sim, so
+            // navigating the menu doesn't twitch the player's character.
+            padDown: (seat, k2) => padSeats[seat] !== undefined
+              && !menus.has(padSeats[seat])
+              && pads.isDown(padSeats[seat], k2),
             end: result => net.send({ t: 'relayEnd', result }),
             sendScore: d => net.send({ t: 'relayScore', d }),
           });
@@ -442,8 +494,8 @@ function gameScreen() {
     holder,
     h('div', { class: 'pad-menus' }, menuPanels()),
     hintBar(G.mode === 'relay'
-      ? [['🎮', 'plays directly'], ['📱', 'phone = gamepad']]
-      : [['🎮 A', 'choose'], ['🎮 Y', 'peek hand'], ['🎮 Start', 'pause (host)'], ['📱', 'play from your phone']]),
+      ? [['🎮', 'plays directly'], ['🎮 Start', 'pause / quit'], ['📱', 'phone = gamepad']]
+      : [['🎮 A', 'choose'], ['🎮 Y', 'peek hand'], ['🎮 Start', 'pause / exit'], ['📱', 'play from your phone']]),
   );
 }
 

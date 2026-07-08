@@ -5,9 +5,26 @@
 # session's autostart). Waits for the game server, then runs Chromium
 # fullscreen on the TV view — and relaunches it if it ever exits, so the
 # TV always shows the console.
+#
+# Getting out (troubleshooting with an attached keyboard): press
+# Ctrl+Alt+Q on the TV page — the server drops a stop flag, this script
+# closes Chromium and exits instead of relaunching, leaving the desktop.
+# Get back in by running `party-station-kiosk` (or this script) from any
+# terminal, including over SSH.
 set -u
 
 URL="${KIOSK_URL:-http://localhost/tv}"
+
+# When relaunched from SSH or a virtual terminal there's no display in the
+# environment — aim at the Pi's desktop session.
+if [ -z "${WAYLAND_DISPLAY:-}" ] && [ -z "${DISPLAY:-}" ]; then
+  export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+  if [ -S "$XDG_RUNTIME_DIR/wayland-0" ]; then
+    export WAYLAND_DISPLAY=wayland-0
+  else
+    export DISPLAY=:0
+  fi
+fi
 
 # Only one kiosk per boot, even if two autostart mechanisms both fire.
 exec 9>"${XDG_RUNTIME_DIR:-/tmp}/party-station-kiosk.lock"
@@ -32,6 +49,11 @@ done
 PROFILE_DIR="${HOME}/.config/party-station-kiosk"
 mkdir -p "$PROFILE_DIR"
 
+# Ctrl+Alt+Q on the TV page asks the server to create this flag; we close
+# the browser and stop relaunching. Stale flags must not block a fresh start.
+STOP_FLAG="$PROFILE_DIR/stop"
+rm -f "$STOP_FLAG"
+
 while true; do
   # Clear the "Chromium didn't shut down correctly" state from hard poweroffs.
   PREFS="$PROFILE_DIR/Default/Preferences"
@@ -48,6 +70,20 @@ while true; do
     --autoplay-policy=no-user-gesture-required \
     --check-for-update-interval=31536000 \
     --ozone-platform-hint=auto \
-    "$URL"
+    "$URL" &
+  BROWSER_PID=$!
+  while kill -0 "$BROWSER_PID" 2>/dev/null; do
+    if [ -e "$STOP_FLAG" ]; then
+      kill "$BROWSER_PID" 2>/dev/null
+      break
+    fi
+    sleep 1
+  done
+  wait "$BROWSER_PID" 2>/dev/null
+  if [ -e "$STOP_FLAG" ]; then
+    rm -f "$STOP_FLAG"
+    echo "party-station-kiosk: exited via Ctrl+Alt+Q — run party-station-kiosk to relaunch." >&2
+    exit 0
+  fi
   sleep 2
 done
