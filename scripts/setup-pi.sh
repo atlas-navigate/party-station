@@ -161,8 +161,8 @@ if [ "${SETUP_RETROPIE:-1}" != "0" ] && grep -qi "raspberry pi" /proc/device-tre
       echo "    $pkg — already installed"
       continue
     fi
-    echo "    Installing $pkg… (binaries are quick; source builds can take a while)"
-    if ! "$RP_SETUP/retropie_packages.sh" "$pkg" _auto_ > "/tmp/retropie-$pkg.log" 2>&1; then
+    echo "    Installing $pkg… (binaries are quick; source builds can take a while — output below)"
+    if ! "$RP_SETUP/retropie_packages.sh" "$pkg" _auto_ 2>&1 | tee "/tmp/retropie-$pkg.log"; then
       echo "    ⚠ $pkg failed (see /tmp/retropie-$pkg.log) — install later via $RP_SETUP/retropie_setup.sh"
     fi
   done
