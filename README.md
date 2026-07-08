@@ -65,7 +65,9 @@ mapping" pads work.
 ## Setup on a Raspberry Pi
 
 Flash Raspberry Pi OS (Lite is fine for phones-only; use the desktop image if
-you want the Pi itself to drive the TV), get it on your network, then:
+you want the Pi itself to drive the TV — and the **Legacy/Bookworm** variant
+if you want the retro Cabinet, see the note below), get it on your network,
+then:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/atlas-navigate/party-station/main/scripts/setup-pi.sh | sudo bash
@@ -83,6 +85,14 @@ That one command sets up the whole console, no menus to click through:
 - **RetroArch + emulator cores** (arcade, NES, SNES, Genesis, PS1) via
   RetroPie's binary packages, so retro ROMs play out of the box. ROMs are
   **never** included — add dumps of games you own afterwards (next section).
+
+> **Retro Cabinet needs Bookworm:** RetroPie only ships prebuilt emulators
+> for Raspberry Pi OS 12 (Bookworm) and older — in the Raspberry Pi Imager
+> pick **Raspberry Pi OS (Legacy, Bookworm)**. On newer images (Debian 13
+> "Trixie"+) the script **skips the emulators** instead of silently
+> compiling them for hours; opt in to the long source build with
+> `curl … | sudo RETROPIE_FROM_SOURCE=1 bash` if you'd rather wait than
+> re-flash. The party games themselves run on any image.
 
 Opt out of pieces with env vars — e.g. the Pi is also your desktop machine,
 or you don't want emulators:

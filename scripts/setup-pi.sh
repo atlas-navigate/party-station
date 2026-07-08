@@ -11,13 +11,24 @@
 #   5. Makes the Pi a console: boots straight into a Chromium kiosk showing the
 #      TV view on the HDMI screen (desktop image required; skip with SETUP_KIOSK=0)
 #   6. Installs RetroArch + emulator cores via RetroPie for the retro Cabinet
-#      (real Pi only; skip with SETUP_RETROPIE=0; ROMs are never included)
+#      (real Pi only; skip with SETUP_RETROPIE=0; prebuilt emulators need
+#      Raspberry Pi OS 12 "Bookworm" or older — on newer OSes the cores are
+#      skipped unless RETROPIE_FROM_SOURCE=1; ROMs are never included)
 set -euo pipefail
+
+# This script usually runs as `curl … | sudo bash` — nothing may ever stop to
+# ask a question, or the install looks hung. Keep apt and git non-interactive.
+export DEBIAN_FRONTEND=noninteractive
+export GIT_TERMINAL_PROMPT=0
+apt_install() {
+  apt-get install -y -qq \
+    -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold "$@"
+}
 
 REPO="https://github.com/atlas-navigate/party-station.git"
 APP_DIR="${APP_DIR:-/opt/party-station}"
 HOSTNAME_WANTED="party-station"
-RUN_USER="${SUDO_USER:-pi}"
+RUN_USER="${RUN_USER:-${SUDO_USER:-pi}}"
 HOME_DIR="$(getent passwd "$RUN_USER" | cut -d: -f6 || true)"
 HOME_DIR="${HOME_DIR:-/home/$RUN_USER}"
 
@@ -26,9 +37,15 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
+if ! id -u "$RUN_USER" >/dev/null 2>&1; then
+  echo "User \"$RUN_USER\" doesn't exist — the console needs a normal account to run as."
+  echo "Run this with sudo from your regular user, or pick one: RUN_USER=<user>"
+  exit 1
+fi
+
 echo "==> Installing packages (git, avahi, curl)…"
 apt-get update -qq
-apt-get install -y -qq git avahi-daemon curl ca-certificates >/dev/null
+apt_install git avahi-daemon curl ca-certificates >/dev/null
 
 echo "==> Setting hostname to ${HOSTNAME_WANTED} (→ http://${HOSTNAME_WANTED}.local)…"
 CURRENT_HOST="$(hostname)"
@@ -50,8 +67,15 @@ if command -v node >/dev/null 2>&1; then
 fi
 if [ "$NEED_NODE" = 1 ]; then
   echo "    Installing Node.js 20 from NodeSource…"
-  curl -fsSL https://deb.nodesource.com/setup_20.x | bash - >/dev/null
-  apt-get install -y -qq nodejs >/dev/null
+  if ! curl -fsSL https://deb.nodesource.com/setup_20.x | bash - >/dev/null 2>&1; then
+    echo "    NodeSource doesn't cover this OS/arch — falling back to the distro's nodejs…"
+  fi
+  apt_install nodejs >/dev/null
+  if ! command -v node >/dev/null 2>&1 \
+    || [ "$(node -e 'console.log(process.versions.node.split(".")[0])')" -lt 18 ]; then
+    echo "!! Couldn't get Node.js 18+ onto this system — install it manually, then re-run."
+    exit 1
+  fi
 fi
 echo "    Node $(node --version)"
 
@@ -90,7 +114,7 @@ if [ "${SETUP_KIOSK:-1}" != "0" ]; then
     command -v chromium-browser >/dev/null 2>&1 && KIOSK_BROWSER="chromium-browser"
     [ -z "$KIOSK_BROWSER" ] && command -v chromium >/dev/null 2>&1 && KIOSK_BROWSER="chromium"
     if [ -z "$KIOSK_BROWSER" ]; then
-      apt-get install -y -qq chromium-browser >/dev/null 2>&1 || apt-get install -y -qq chromium >/dev/null 2>&1 || true
+      apt_install chromium-browser >/dev/null 2>&1 || apt_install chromium >/dev/null 2>&1 || true
       command -v chromium-browser >/dev/null 2>&1 && KIOSK_BROWSER="chromium-browser"
       [ -z "$KIOSK_BROWSER" ] && command -v chromium >/dev/null 2>&1 && KIOSK_BROWSER="chromium"
     fi
@@ -142,37 +166,63 @@ EOF
 fi
 
 # ── RetroPie / RetroArch (the Cabinet) — on by default on a real Pi. ──
-# Skip with SETUP_RETROPIE=0. Installs RetroArch + libretro cores from
-# RetroPie's binary repo (falls back to source builds). No ROMs are ever
-# included — add dumps of games you own at http://party-station.local/roms.
+# Skip with SETUP_RETROPIE=0. RetroPie only ships prebuilt emulators for
+# Raspberry Pi OS 10/11 (32-bit) and 12 "Bookworm"; on newer OS releases
+# everything compiles from source, which takes HOURS on a Pi and looks like
+# a hang — so that path is opt-in via RETROPIE_FROM_SOURCE=1. No ROMs are
+# ever included — add dumps of games you own at http://party-station.local/roms.
 if [ "${SETUP_RETROPIE:-1}" != "0" ] && grep -qi "raspberry pi" /proc/device-tree/model 2>/dev/null; then
-  echo "==> Setting up RetroArch + emulator cores (the retro Cabinet)…"
-  apt-get install -y -qq dialog unzip >/dev/null 2>&1 || true
-  RP_SETUP="$HOME_DIR/RetroPie-Setup"
-  if [ ! -d "$RP_SETUP/.git" ]; then
-    sudo -u "$RUN_USER" git clone --depth=1 https://github.com/RetroPie/RetroPie-Setup.git "$RP_SETUP"
+  DEBIAN_VER="$(. /etc/os-release && echo "${VERSION_ID:-0}")"
+  ARCH="$(dpkg --print-architecture)"
+  HAS_BINARIES=0   # mirrors RetroPie-Setup's own rule (scriptmodules/system.sh)
+  case "$DEBIAN_VER" in
+    10|11) [ "$ARCH" = "armhf" ] && HAS_BINARIES=1 ;;
+    12)    HAS_BINARIES=1 ;;
+  esac
+  if [ "$HAS_BINARIES" = 0 ] && [ "${RETROPIE_FROM_SOURCE:-0}" != "1" ]; then
+    cat <<EOF
+==> Skipping the retro Cabinet: RetroPie has no prebuilt emulators for this
+    OS (Debian ${DEBIAN_VER}, ${ARCH}), and compiling them on a Pi takes hours.
+    The party games work regardless. To get the Cabinet, either:
+      • flash "Raspberry Pi OS (Legacy, Bookworm)" and re-run this script, or
+      • accept the multi-hour source build by re-running with:
+          curl -fsSL https://raw.githubusercontent.com/atlas-navigate/party-station/main/scripts/setup-pi.sh | sudo RETROPIE_FROM_SOURCE=1 bash
+EOF
   else
-    sudo -u "$RUN_USER" git -C "$RP_SETUP" pull --ff-only >/dev/null 2>&1 || true
+    echo "==> Setting up RetroArch + emulator cores (the retro Cabinet)…"
+    if [ "$HAS_BINARIES" = 0 ]; then
+      echo "    No prebuilt emulators for this OS — compiling from source."
+      echo "    This takes HOURS on a Pi; leave it running (build output streams below)."
+    fi
+    apt_install dialog unzip >/dev/null 2>&1 || true
+    RP_SETUP="$HOME_DIR/RetroPie-Setup"
+    if [ ! -d "$RP_SETUP/.git" ]; then
+      sudo -u "$RUN_USER" env GIT_TERMINAL_PROMPT=0 git clone --depth=1 https://github.com/RetroPie/RetroPie-Setup.git "$RP_SETUP"
+    else
+      sudo -u "$RUN_USER" env GIT_TERMINAL_PROMPT=0 git -C "$RP_SETUP" pull --ff-only >/dev/null 2>&1 || true
+    fi
+    # _auto_ = binary install when RetroPie ships one for this Pi/OS, else a
+    # source build. Skip anything already installed. lr-mame2003-plus goes
+    # last — it is by far the longest build when compiling from source.
+    # </dev/null: our stdin is the curl pipe; a child must never read it.
+    for pkg in retroarch lr-fceumm lr-snes9x lr-genesis-plus-gx lr-pcsx-rearmed lr-mame2003-plus; do
+      if [ -d "/opt/retropie/emulators/$pkg" ] || [ -d "/opt/retropie/libretrocores/$pkg" ]; then
+        echo "    $pkg — already installed"
+        continue
+      fi
+      echo "    Installing $pkg… (binaries take a minute or two; source builds run long — output below)"
+      if ! "$RP_SETUP/retropie_packages.sh" "$pkg" _auto_ </dev/null 2>&1 | tee "/tmp/retropie-$pkg.log"; then
+        echo "    ⚠ $pkg failed (see /tmp/retropie-$pkg.log) — install later via $RP_SETUP/retropie_setup.sh"
+      fi
+    done
+    sudo -u "$RUN_USER" mkdir -p \
+      "$HOME_DIR/RetroPie/roms/arcade" "$HOME_DIR/RetroPie/roms/nes" \
+      "$HOME_DIR/RetroPie/roms/snes" "$HOME_DIR/RetroPie/roms/megadrive" \
+      "$HOME_DIR/RetroPie/roms/psx" "$HOME_DIR/RetroPie/roms/incoming" \
+      "$HOME_DIR/RetroPie/BIOS"
+    echo "    Cabinet ready. Add ROMs at http://${HOSTNAME_WANTED}.local/roms"
+    echo "    (or scp them into ~/RetroPie/roms/incoming — they sort themselves)."
   fi
-  # _auto_ = binary install when RetroPie ships one for this Pi/OS, else a
-  # source build (slow but unattended). Skip anything already installed.
-  for pkg in retroarch lr-mame2003-plus lr-fceumm lr-snes9x lr-genesis-plus-gx lr-pcsx-rearmed; do
-    if [ -d "/opt/retropie/emulators/$pkg" ] || [ -d "/opt/retropie/libretrocores/$pkg" ]; then
-      echo "    $pkg — already installed"
-      continue
-    fi
-    echo "    Installing $pkg… (binaries are quick; source builds can take a while — output below)"
-    if ! "$RP_SETUP/retropie_packages.sh" "$pkg" _auto_ 2>&1 | tee "/tmp/retropie-$pkg.log"; then
-      echo "    ⚠ $pkg failed (see /tmp/retropie-$pkg.log) — install later via $RP_SETUP/retropie_setup.sh"
-    fi
-  done
-  sudo -u "$RUN_USER" mkdir -p \
-    "$HOME_DIR/RetroPie/roms/arcade" "$HOME_DIR/RetroPie/roms/nes" \
-    "$HOME_DIR/RetroPie/roms/snes" "$HOME_DIR/RetroPie/roms/megadrive" \
-    "$HOME_DIR/RetroPie/roms/psx" "$HOME_DIR/RetroPie/roms/incoming" \
-    "$HOME_DIR/RetroPie/BIOS"
-  echo "    Cabinet ready. Add ROMs at http://${HOSTNAME_WANTED}.local/roms"
-  echo "    (or scp them into ~/RetroPie/roms/incoming — they sort themselves)."
 elif [ "${SETUP_RETROPIE:-1}" != "0" ]; then
   echo "==> Not a Raspberry Pi — skipping RetroArch/RetroPie setup."
 fi
