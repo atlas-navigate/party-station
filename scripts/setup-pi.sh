@@ -18,7 +18,7 @@ REPO="https://github.com/atlas-navigate/party-station.git"
 APP_DIR="${APP_DIR:-/opt/party-station}"
 HOSTNAME_WANTED="party-station"
 RUN_USER="${SUDO_USER:-pi}"
-HOME_DIR="$(getent passwd "$RUN_USER" | cut -d: -f6)"
+HOME_DIR="$(getent passwd "$RUN_USER" | cut -d: -f6 || true)"
 HOME_DIR="${HOME_DIR:-/home/$RUN_USER}"
 
 if [ "$(id -u)" -ne 0 ]; then
