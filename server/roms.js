@@ -472,19 +472,27 @@ export function romsRouter({ onChange }) {
       // Auto-routed zips: now that the bytes are on disk, look inside — a
       // zipped console game gets unpacked into its system; only true
       // arcade sets stay zipped.
-      if (wanted === 'auto' && !isBios && path.extname(name).toLowerCase() === '.zip') {
+      // Every zip gets probed — even with an explicit system from the
+      // client (stale pages once mislabeled console zips as arcade).
+      // Evidence inside the zip beats what the request claimed.
+      if (!isBios && path.extname(name).toLowerCase() === '.zip' && archiveKind(tmp) !== 'zip') {
         const kind = archiveKind(tmp);
-        if (kind !== 'zip') {
+        if (wanted === 'auto') {
           return abort(415, kind
             ? `"${name}" is really a ${kind} renamed to .zip — extract it and upload the game file inside.`
             : `"${name}" isn't actually a zip file — check the download.`);
         }
+        // explicit non-zip .zip: honor the caller, they may know better
+      } else if (!isBios && path.extname(name).toLowerCase() === '.zip') {
         const entries = zipEntries(tmp);
         const unsupported = sniffUnsupported(entries);
         if (unsupported) {
           return abort(415, `That's a ${unsupported} game — this console can't emulate ${unsupported}.`);
         }
         const sniffed = sniffEntries(entries);
+        if (sniffed && sniffed !== wanted && wanted !== 'auto') {
+          console.log(`roms: "${name}" was uploaded as ${wanted} but contains ${sniffed} — probing wins`);
+        }
         if (sniffed && (sniffed === 'bios' || systemDir(sniffed))) {
           try {
             const done = await extractConsoleZip(tmp, entries);

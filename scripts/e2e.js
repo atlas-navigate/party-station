@@ -185,6 +185,11 @@ if (alice.sync.emu?.available) {
   }
   r = await (await upload('console game.zip', 'snes')).json();
   if (r.system !== 'snes') throw new Error('explicit system override ignored');
+  // A stale client may claim "arcade" for a console zip — the probe wins.
+  r = await (await upload('Stale Page.zip', 'arcade', zipOf('Stale Page.gbc', Buffer.from('GBCDATA')))).json();
+  if (r.system !== 'gbc' || r.file !== 'Stale Page.gbc') {
+    throw new Error('probe should override stale explicit system: ' + JSON.stringify(r));
+  }
   r = await (await upload('mystery.xyz')).json();
   if (!r.err) throw new Error('unknown extension should be rejected');
   const lib = await (await fetch(`${base}/api/roms`)).json();
@@ -262,7 +267,8 @@ if (alice.sync.emu?.available) {
 
   for (const [sys, file] of [['snes', 'Super Test (USA).sfc'], ['arcade', 'coinop.zip'],
                              ['snes', 'console game.zip'], ['nes', 'Dropped Game.nes'],
-                             ['gb', 'Monopoly Test.gb'], ['psx', 'Blitz Test.chd']]) {
+                             ['gb', 'Monopoly Test.gb'], ['psx', 'Blitz Test.chd'],
+                             ['gbc', 'Stale Page.gbc']]) {
     await fetch(`${base}/api/roms/${sys}/${encodeURIComponent(file)}`, { method: 'DELETE' });
   }
   const lib2 = await (await fetch(`${base}/api/roms`)).json();

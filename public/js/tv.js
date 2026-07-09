@@ -94,19 +94,22 @@ function handlePad(pad, btn, isRepeat) {
   }
 }
 
-function hubList() {
+// Hub entries grouped into visual rows (retro: one row per system; party:
+// one row per category) so the cursor moves the way the screen looks.
+function hubGroups() {
   if (tvMode === 'retro') {
-    const ents = [];
-    for (const s of (sync.emu?.systems || [])) {
-      for (const gm of s.games) {
-        ents.push({ kind: 'emu', system: s.id, sysName: s.name, icon: s.icon, file: gm.file, title: gm.title });
-      }
-    }
-    return ents;
+    return (sync.emu?.systems || []).map(s =>
+      s.games.map(gm => ({ kind: 'emu', system: s.id, sysName: s.name, icon: s.icon, file: gm.file, title: gm.title })));
   }
-  if (tvMode === 'party') return sync.games.map(g => ({ kind: 'game', g }));
+  if (tvMode === 'party') {
+    return ['cards', 'board', 'arcade']
+      .map(c => sync.games.filter(g => g.category === c).map(g => ({ kind: 'game', g })))
+      .filter(row => row.length);
+  }
   return [];
 }
+
+function hubList() { return hubGroups().flat(); }
 
 function padHub(pad, btn) {
   // Landing chooser: pick between party games and the retro cabinet.
@@ -122,12 +125,31 @@ function padHub(pad, btn) {
     return;
   }
   if (btn === 'b') { tvMode = null; sfx.back(); render(); return; }
-  const list = hubList();
-  const cols = 5;
-  if (btn === 'left') hubCursor = Math.max(0, hubCursor - 1);
-  if (btn === 'right') hubCursor = Math.min(list.length - 1, hubCursor + 1);
-  if (btn === 'up') hubCursor = Math.max(0, hubCursor - cols);
-  if (btn === 'down') hubCursor = Math.min(list.length - 1, hubCursor + cols);
+  const groups = hubGroups();
+  const list = groups.flat();
+  if (!list.length) { render(); return; }
+  // The list can shrink underneath the cursor (ROMs re-sorted mid-session).
+  hubCursor = Math.min(Math.max(0, hubCursor), list.length - 1);
+  // Row/column navigation matching the rendered groups — a one-game row
+  // (a system with a single ROM) is still a stop on the way down.
+  let row = 0, start = 0;
+  while (row < groups.length - 1 && hubCursor >= start + groups[row].length) {
+    start += groups[row].length;
+    row++;
+  }
+  let col = hubCursor - start;
+  if (btn === 'left') col = Math.max(0, col - 1);
+  if (btn === 'right') col = Math.min(groups[row].length - 1, col + 1);
+  if (btn === 'up' && row > 0) {
+    row--;
+    start -= groups[row].length;
+    col = Math.min(col, groups[row].length - 1);
+  } else if (btn === 'down' && row < groups.length - 1) {
+    start += groups[row].length;
+    row++;
+    col = Math.min(col, groups[row].length - 1);
+  }
+  hubCursor = start + col;
   if (['left', 'right', 'up', 'down'].includes(btn)) sfx.blip();
   const ent = list[hubCursor];
   if ((btn === 'a' || btn === 'start') && ent) {

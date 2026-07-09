@@ -181,6 +181,18 @@
     }
 
     refresh();
+
+    // A self-update restarts the server with new page code — reload stale
+    // tabs (this page can sit open for days) once no upload is running.
+    let pageVersion = null;
+    setInterval(async () => {
+      try {
+        const s = await (await fetch('/api/status')).json();
+        if (pageVersion === null) pageVersion = s.version;
+        else if (s.version !== pageVersion
+          && !queue.some(q => q.status === 'wait' || q.status === 'up')) location.reload();
+      } catch {}
+    }, 20000);
   </script>
 </body>
 </html>

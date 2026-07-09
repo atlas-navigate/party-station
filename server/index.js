@@ -1,5 +1,6 @@
 // Party Station — local party game server.
 // Serves the player app (/) and TV app (/tv), and speaks WebSocket to both.
+import { execFile } from 'child_process';
 import express from 'express';
 import fs from 'fs';
 import http from 'http';
@@ -35,6 +36,11 @@ app.post('/api/kiosk/exit', (_req, res) => {
   } catch (e) {
     res.status(500).json({ ok: false, err: e.message });
   }
+});
+// Kill the kiosk's Chromium (the kiosk loop restarts it in seconds with a
+// fresh page load) — recovery for a TV stuck on stale UI code.
+app.post('/api/tv/reload', (_req, res) => {
+  execFile('pkill', ['-f', 'user-data-dir=.*party-station-kiosk'], () => res.json({ ok: true }));
 });
 app.get('/api/status', (_req, res) => res.json({
   ok: true,
