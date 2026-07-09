@@ -55,6 +55,28 @@ const ZIP_INNER = {
   '.chd': 'psx', '.pbp': 'psx', '.cue': 'psx',
 };
 
+// First probe: is this file actually a zip? Downloads regularly arrive as
+// 7z/rar renamed .zip, which no emulator (or our extractor) can read.
+const ARCHIVE_MAGIC = [
+  [[0x50, 0x4b], 'zip'],
+  [[0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c], '7-Zip archive'],
+  [[0x52, 0x61, 0x72, 0x21], 'RAR archive'],
+  [[0x1f, 0x8b], 'gzip archive'],
+];
+
+export function archiveKind(file) {
+  try {
+    const fd = fs.openSync(file, 'r');
+    const head = Buffer.alloc(8);
+    const n = fs.readSync(fd, head, 0, 8, 0);
+    fs.closeSync(fd);
+    for (const [sig, label] of ARCHIVE_MAGIC) {
+      if (n >= sig.length && sig.every((b, i) => head[i] === b)) return label;
+    }
+    return null;
+  } catch { return null; }
+}
+
 export function zipEntries(file) {
   let fd;
   try {
@@ -283,6 +305,14 @@ function sortIncoming(onChange) {
 
     // Console games inside zips get unpacked to their system, not moved.
     if (path.extname(file).toLowerCase() === '.zip' && !extracting.has(src)) {
+      const kind = archiveKind(src);
+      if (kind !== 'zip') {
+        if (!warned.has(file)) {
+          warned.add(file);
+          console.log(`roms: "${file}" is ${kind ? 'really a ' + kind : 'not actually a zip'} — leaving it in ${INCOMING}/`);
+        }
+        continue;
+      }
       const entries = zipEntries(src);
       const unsupported = sniffUnsupported(entries);
       if (unsupported) {
@@ -443,6 +473,12 @@ export function romsRouter({ onChange }) {
       // zipped console game gets unpacked into its system; only true
       // arcade sets stay zipped.
       if (wanted === 'auto' && !isBios && path.extname(name).toLowerCase() === '.zip') {
+        const kind = archiveKind(tmp);
+        if (kind !== 'zip') {
+          return abort(415, kind
+            ? `"${name}" is really a ${kind} renamed to .zip — extract it and upload the game file inside.`
+            : `"${name}" isn't actually a zip file — check the download.`);
+        }
         const entries = zipEntries(tmp);
         const unsupported = sniffUnsupported(entries);
         if (unsupported) {

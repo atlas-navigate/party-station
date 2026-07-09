@@ -150,27 +150,11 @@ if (alice.sync.emu?.available) {
   // scp "incoming" folder sorter.
   const base = `http://127.0.0.1:${PORT}`;
   const romsDir = process.env.ROMS_DIR;
-  const upload = (name, system = 'auto') =>
+  const upload = (name, system = 'auto', body = 'fake-rom-bytes') =>
     fetch(`${base}/api/roms?name=${encodeURIComponent(name)}&system=${system}`,
-      { method: 'POST', body: 'fake-rom-bytes' });
+      { method: 'POST', body });
 
-  let r = await (await upload('Super Test (USA).sfc')).json();
-  if (r.system !== 'snes') throw new Error('.sfc did not route to snes: ' + JSON.stringify(r));
-  r = await (await upload('coinop.zip')).json();
-  if (r.system !== 'arcade') throw new Error('.zip did not route to arcade');
-  r = await (await upload('console game.zip', 'snes')).json();
-  if (r.system !== 'snes') throw new Error('explicit system override ignored');
-  r = await (await upload('mystery.xyz')).json();
-  if (!r.err) throw new Error('unknown extension should be rejected');
-  const lib = await (await fetch(`${base}/api/roms`)).json();
-  const snes = lib.systems.find(s => s.id === 'snes');
-  if (!snes || !snes.files.some(f => f.file === 'Super Test (USA).sfc')) {
-    throw new Error('uploaded ROM missing from library listing');
-  }
-  ok('ROM upload routes by extension (override + rejects unknowns)');
-
-  // Zipped console games get sniffed by their contents and UNPACKED into
-  // the right system, instead of being dumped whole into arcade.
+  // Build a real (stored or deflated) zip for content-probing tests.
   const zipOf = (inner, data, method = 0, rawLen = data.length) => {
     const nameBuf = Buffer.from(inner);
     const lfh = Buffer.alloc(30);
@@ -190,6 +174,28 @@ if (alice.sync.emu?.available) {
     eocd.writeUInt32LE(30 + nameBuf.length + data.length, 16);
     return Buffer.concat([lfh, nameBuf, data, cdh, nameBuf, eocd]);
   };
+
+  let r = await (await upload('Super Test (USA).sfc')).json();
+  if (r.system !== 'snes') throw new Error('.sfc did not route to snes: ' + JSON.stringify(r));
+  r = await (await upload('coinop.zip', 'auto', zipOf('coinop.rom', Buffer.from('ARCADEROM')))).json();
+  if (r.system !== 'arcade') throw new Error('real arcade-looking zip did not route to arcade: ' + JSON.stringify(r));
+  r = await (await upload('junk.zip')).json(); // not actually a zip
+  if (!r.err || !r.err.includes("isn't actually a zip")) {
+    throw new Error('non-zip .zip should be rejected: ' + JSON.stringify(r));
+  }
+  r = await (await upload('console game.zip', 'snes')).json();
+  if (r.system !== 'snes') throw new Error('explicit system override ignored');
+  r = await (await upload('mystery.xyz')).json();
+  if (!r.err) throw new Error('unknown extension should be rejected');
+  const lib = await (await fetch(`${base}/api/roms`)).json();
+  const snes = lib.systems.find(s => s.id === 'snes');
+  if (!snes || !snes.files.some(f => f.file === 'Super Test (USA).sfc')) {
+    throw new Error('uploaded ROM missing from library listing');
+  }
+  ok('ROM upload routes by extension (override + rejects unknowns)');
+
+  // Zipped console games get sniffed by their contents and UNPACKED into
+  // the right system, instead of being dumped whole into arcade.
   r = await (await fetch(`${base}/api/roms?name=${encodeURIComponent('Monopoly Test.zip')}&system=auto`,
     { method: 'POST', body: zipOf('Monopoly Test.gb', Buffer.from('GBDATA')) })).json();
   if (r.system !== 'gb' || r.file !== 'Monopoly Test.gb') {
