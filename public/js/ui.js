@@ -63,6 +63,38 @@ export function handStrip(cards, { legal = null, selected = [], onTap, size = ''
   })));
 }
 
+// Adapts a per-sync 2D TV render function to the console shell's scene API
+// (mount/update/rehome/dispose). Overlays a "peek" panel with the cards of
+// any controller player holding Y — pads have no private screen, so this is
+// the only place a pad player can check their hand.
+export function tv2d(render, { peekCards } = {}) {
+  return {
+    mount(holder) {
+      // .tv-main fills the scene area and centers the game, like the shell
+      // did before games moved to 3D; absolute because .tv-scene isn't flex.
+      const box = h('div', { class: 'tv-main', style: 'position:absolute;inset:0' });
+      holder.append(box);
+      return {
+        update(ctx) {
+          render(box, ctx);
+          if (!peekCards || !ctx.peeked?.size) return;
+          const panels = [...ctx.peeked].map(seat => {
+            const cards = peekCards(ctx, seat);
+            if (!cards?.length) return null;
+            return h('div', { class: 'pad-menu' },
+              h('div', { class: 'pad-menu-title' }, `🎮 ${ctx.seats[seat]?.name} — your cards`),
+              h('div', { class: 'row wrap', style: 'gap:4px;max-width:340px' },
+                cards.map(c => cardEl(c, { size: 'sm', button: false }))));
+          }).filter(Boolean);
+          if (panels.length) box.append(h('div', { class: 'peek-panels' }, panels));
+        },
+        rehome(h2) { h2.append(box); },
+        dispose() { box.remove(); },
+      };
+    },
+  };
+}
+
 export function chipEl(seat, opts = {}) {
   const initial = (seat.name || '?').trim()[0]?.toUpperCase() || '?';
   return h('div', {

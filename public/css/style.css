@@ -95,11 +95,6 @@ h2 { font-size: 20px; font-weight: 800; }
 .wordmark .gap { width: clamp(8px, 2vw, 12px); background: none; box-shadow: none; }
 
 /* ---------------------------------------------------------------- hub grid */
-.cat-tabs { display: flex; gap: 8px; margin: 14px 0 12px; }
-.cat-tabs .tok { flex: 1; padding: 10px 6px; font-size: 14px; }
-.cat-tabs .tok.on-cards  { background: var(--cards); color: #2b070e; box-shadow: 0 4px 0 var(--cards-edge); }
-.cat-tabs .tok.on-board  { background: var(--board); color: #06281a; box-shadow: 0 4px 0 var(--board-edge); }
-.cat-tabs .tok.on-arcade { background: var(--arcade); color: #1d1033; box-shadow: 0 4px 0 var(--arcade-edge); }
 
 .game-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .game-tile {
@@ -173,11 +168,19 @@ h2 { font-size: 20px; font-weight: 800; }
 .pcard.sm { width: 40px; height: 56px; border-radius: 6px; padding: 3px 4px; }
 .pcard.sm .r { font-size: 13px; } .pcard.sm .s { font-size: 14px; }
 
+/* Your hand on the phone: a vertical cascade (each card overlapping the one
+   below, corner rank visible) instead of a sideways-scrolling row — every
+   card readable at a glance. Selected/played picks slide out to the right. */
 .hand {
-  display: flex; gap: 6px; overflow-x: auto; padding: 18px 4px 10px;
+  display: flex; flex-direction: column; align-items: center;
+  padding: 12px 4px 10px; max-height: 48vh; overflow-y: auto;
   scrollbar-width: none;
 }
 .hand::-webkit-scrollbar { display: none; }
+.hand .pcard { width: 74px; height: 104px; }
+.hand .pcard .r { font-size: 21px; }
+.hand .pcard + .pcard { margin-top: -76px; } /* 28px strip: a 13-card hand fits unscrolled */
+.hand .pcard.sel { transform: translateX(32px); }
 
 /* ---------------------------------------------------------------- bars */
 .actionbar {
@@ -292,6 +295,12 @@ canvas.arcade { background: var(--felt-deep); border-radius: 18px; box-shadow: 0
 .pad-menu-item.dis { opacity: .35; }
 .pad-menu-item.on::after { content: ' ✓'; color: var(--board); }
 .pad-menu-item.focus.on::after { color: #06281a; }
+/* Peek panels (hold Y on a controller): bottom-right, mirroring the pad
+   menus bottom-left, floating over the 2D game view. */
+.peek-panels {
+  position: absolute; right: 40px; bottom: 64px;
+  display: flex; flex-direction: column; gap: 14px; z-index: 10;
+}
 
 @media (max-width: 420px) {
   .game-grid { gap: 10px; }

@@ -1,7 +1,7 @@
 {
   "name": "party-station",
   "version": "1.0.0",
-  "description": "Local party game station: card, board, and arcade games hosted on a Raspberry Pi. Players join from their phones at http://party-station.local",
+  "description": "Local party game station: classic card games and a retro cabinet hosted on a Raspberry Pi. Players join from their phones at http://party-station.local",
   "type": "module",
   "main": "server/index.js",
   "scripts": {
@@ -16,7 +16,6 @@
   },
   "dependencies": {
     "express": "^4.19.2",
-    "three": "^0.185.1",
     "ws": "^8.18.0"
   },
   "license": "MIT"

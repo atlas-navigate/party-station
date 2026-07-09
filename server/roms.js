@@ -18,7 +18,7 @@ const EXT_ROUTE = {
   '.nes': 'nes',
   '.sfc': 'snes', '.smc': 'snes',
   '.md': 'megadrive', '.gen': 'megadrive', '.bin': 'megadrive',
-  '.cue': 'psx', '.chd': 'psx', '.pbp': 'psx', '.m3u': 'psx',
+  '.cue': 'psx', '.chd': 'psx', '.pbp': 'psx', '.m3u': 'psx', '.iso': 'psx', '.img': 'psx',
   '.z64': 'n64', '.n64': 'n64', '.v64': 'n64',
   '.gba': 'gba',
   '.zip': 'arcade',
@@ -52,7 +52,7 @@ const ZIP_INNER = {
   '.md': 'megadrive', '.gen': 'megadrive',
   '.gb': 'gb', '.gbc': 'gbc', '.gba': 'gba',
   '.z64': 'n64', '.n64': 'n64', '.v64': 'n64',
-  '.chd': 'psx', '.pbp': 'psx', '.cue': 'psx',
+  '.chd': 'psx', '.pbp': 'psx', '.cue': 'psx', '.iso': 'psx', '.img': 'psx',
 };
 
 // First probe: is this file actually a zip? Downloads regularly arrive as
@@ -197,7 +197,7 @@ function extractEntry(src, entry, dest) {
 // Pull every recognized console/disc file out of a zip into its system
 // folder. A .cue means a PS1 disc set — take all its files (.bin tracks
 // included). Returns [{file, system}] of what landed.
-const DISC_SET_EXT = new Set(['.cue', '.bin', '.img', '.sub', '.ccd', '.chd', '.pbp']);
+const DISC_SET_EXT = new Set(['.cue', '.bin', '.img', '.sub', '.ccd', '.chd', '.pbp', '.iso']);
 
 export async function extractConsoleZip(src, entries) {
   const hasCue = entries.some(e => e.name.toLowerCase().endsWith('.cue'));
@@ -231,8 +231,20 @@ function systemDir(systemId) {
 }
 
 export function library() {
+  // BIOS files and anything stuck in incoming/ are invisible on the hub, so
+  // list them here — the /roms page shows them and it makes "the Pi isn't
+  // recognizing my file" diagnosable remotely.
+  let bios = [];
+  try { bios = fs.readdirSync(BIOS_DIR).filter(f => !f.startsWith('.')).sort(); } catch {}
+  let pending = [];
+  try {
+    pending = fs.readdirSync(path.join(ROMS_DIR, INCOMING))
+      .filter(f => !f.startsWith('.') && !f.endsWith('.part')).sort();
+  } catch {}
   return {
     romsDir: ROMS_DIR,
+    bios,
+    pending,
     systems: TARGETS.map(s => {
       let files = [];
       try {

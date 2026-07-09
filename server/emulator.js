@@ -26,7 +26,7 @@ export const SYSTEMS = [
   { id: 'megadrive', name: 'Genesis', icon: '🎮', cores: ['genesis_plus_gx_libretro.so', 'picodrive_libretro.so'], ext: ['.md', '.gen', '.bin', '.zip'] },
   { id: 'gb', name: 'Game Boy', icon: '🎮', cores: ['gambatte_libretro.so'], ext: ['.gb', '.zip'] },
   { id: 'gbc', name: 'Game Boy Color', icon: '🎮', cores: ['gambatte_libretro.so'], ext: ['.gbc', '.zip'] },
-  { id: 'psx', name: 'PlayStation', icon: '💿', cores: ['pcsx_rearmed_libretro.so', 'duckstation_libretro.so'], ext: ['.cue', '.chd', '.pbp', '.m3u'] },
+  { id: 'psx', name: 'PlayStation', icon: '💿', cores: ['pcsx_rearmed_libretro.so', 'duckstation_libretro.so'], ext: ['.cue', '.chd', '.pbp', '.m3u', '.iso', '.img'] },
   { id: 'n64', name: 'Nintendo 64', icon: '🎮', cores: ['mupen64plus_next_libretro.so', 'parallel_n64_libretro.so'], ext: ['.z64', '.n64', '.v64'] },
   { id: 'gba', name: 'Game Boy Advance', icon: '🎮', cores: ['mgba_libretro.so', 'gpsp_libretro.so'], ext: ['.gba'] },
 ];

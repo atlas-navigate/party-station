@@ -1,6 +1,4 @@
-import { h, mount, cardEl, handStrip } from '../ui.js';
-import { cardTable } from '../three-app/cardtable.js';
-import { makeCard } from '../three-app/assets.js';
+import { h, mount, cardEl, handStrip, chipEl, tv2d } from '../ui.js';
 
 const DIRS = { 1: 'Pass 3 cards LEFT ⬅️', 3: 'Pass 3 cards RIGHT ➡️', 2: 'Pass 3 cards ACROSS ⬆️', 0: 'No passing this round' };
 const NICE = c => (c[0] === 'T' ? '10' : c[0]) + ({ s: '♠', h: '♥', d: '♦', c: '♣' }[c[1]]);
@@ -53,39 +51,30 @@ export const player = {
   },
 };
 
-export const tv = {
-  mount(holder, ctx) {
-    return cardTable(holder, ctx, {
-      turnSeat: c => c.pub.phase === 'play' ? c.pub.turn : -1,
-      seatCards: (c, i) => ({ count: c.pub.handCounts[i] }),
-      peekCards: (c, i) => c.privOf(i)?.hand || [],
-      seatSub: (c, i) => `${c.pub.scores[i]} pts${c.pub.takenPts?.[i] ? ` (+${c.pub.takenPts[i]})` : ''}`,
-      centerKey: c => JSON.stringify([c.pub.phase, c.pub.trick, c.pub.lastTrick, c.pub.round, c.pub.passedFlags]),
-      center(c, C) {
-        const pub = c.pub;
-        C.label(`Round ${pub.round} · to ${pub.target}${pub.heartsBroken ? ' · 💔 broken' : ''}`,
-          { y: 2.6, size: 24 });
-        if (pub.phase === 'pass') {
-          C.label(DIRS[pub.dir], { y: 1.6, size: 34, bg: '#ffb52e', });
-          C.label(c.seats.map((s, i) => pub.passedFlags?.[i] ? `${s.name} ✓` : s.name).join('   '),
-            { y: 0.9, size: 20 });
-          return;
-        }
-        // Trick cards slide toward whoever played them.
-        for (const t of pub.trick) {
-          const m = makeCard(t.card);
-          const p = C.seatPos(t.seat, 1.7);
-          m.position.set(p.x, 0.05 + pub.trick.indexOf(t) * 0.012, p.z);
-          m.rotation.z = (t.seat / c.seats.length) * Math.PI * 2;
-          C.group.add(m);
-        }
-        if (!pub.trick.length && pub.lastTrick) {
-          C.label(`${c.seats[pub.lastTrick.winner].name} takes the trick`, { y: 0.7, size: 22 });
-        }
-      },
-    });
-  },
-};
+export const tv = tv2d((el, ctx) => {
+  const { pub, seats } = ctx;
+  const positions = ['bottom:8%;left:50%;transform:translateX(-50%)', 'left:16%;top:50%;transform:translateY(-50%)',
+    'top:6%;left:50%;transform:translateX(-50%)', 'right:16%;top:50%;transform:translateY(-50%)'];
+  mount(el,
+    h('div', { style: 'position:relative;width:min(66vh,700px);height:min(60vh,620px);background:#1d2138;border-radius:50%;box-shadow:inset 0 0 80px #0008, 0 8px 0 var(--edge)' },
+      pub.phase === 'pass'
+        ? h('div', { class: 'center', style: 'position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;gap:8px' },
+          h('div', { style: 'font-size:44px;font-weight:800' }, DIRS[pub.dir]),
+          h('div', { class: 'dim' }, seats.map((s, i) => pub.passedFlags?.[i] ? `${s.name} ✓` : s.name).join(' · ')))
+        : pub.trick.map(t => h('div', { style: `position:absolute;${positions[t.seat]}` },
+          cardEl(t.card, { size: 'lg', button: false }))),
+      pub.lastTrick && !pub.trick.length && pub.phase === 'play'
+        ? h('div', { class: 'center dim', style: 'position:absolute;bottom:42%;width:100%;font-size:19px' },
+          `${seats[pub.lastTrick.winner].name} takes the trick`)
+        : null,
+    ),
+    h('div', { class: 'tv-seats', style: 'position:absolute;bottom:0;width:100%' },
+      seats.map((s, i) => chipEl(s, {
+        turn: pub.phase === 'play' && pub.turn === i,
+        extra: `· ${pub.scores[i]}${pub.takenPts ? ' (+' + pub.takenPts[i] + ')' : ''}`,
+      }))),
+  );
+}, { peekCards: (ctx, seat) => ctx.privOf(seat)?.hand });
 
 export function padChoices({ pub, priv, seat }, stage) {
   if (pub.phase === 'pass' && priv.passing) {

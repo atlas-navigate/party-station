@@ -1,40 +1,31 @@
 # 🎉 Party Station
 
-A game **console** built on a Raspberry Pi. The Pi renders every game in 3D on
-the TV — dealt cards on a felt table, a property board with rolling dice and
-little houses, a hex island, arcade courts and arenas — and players control it
-with **phones** (browser at **http://party-station.local**) or **Bluetooth
-controllers** paired to the Pi. Everything runs on your LAN; no internet
-needed to play. Empty seats are filled by bots, and long games save
+A game **console** built on a Raspberry Pi. The TV shows the shared table for
+five classic card games (plus a full retro Cabinet via RetroArch), and players
+control it with **phones** (browser at **http://party-station.local**) or
+**Bluetooth controllers** paired to the Pi. Everything runs on your LAN; no
+internet needed to play. Empty seats are filled by bots, and long games save
 automatically so you can pick them up next game night.
 
 ## The games
 
-| Category | Games |
-| --- | --- |
-| 🃏 Cards | Hearts · Crazy 8s · Texas Hold'em · Blackjack · Go Fish |
-| 🎲 Board | Tycoon Trail (property trading) · Milestones (life path) · Candy Dash (color race) · Islanders (island settlement) |
-| 🕹️ Arcade | Slam City (2v2 hoops) · Combat Legends (1v1 fighter) · Incognito (word impostor) · Gridiron Rush (play-calling football) |
-
-The board and arcade titles are **original games** built for Party Station.
-They're genre tributes — not copies of any commercial game — so the whole
-repo is safe to share and host.
+🃏 **Cards:** Hearts · Crazy 8s · Texas Hold'em · Blackjack · Go Fish
 
 ## How it plays
 
 - **The TV is the console screen.** Open `http://party-station.local/tv` on
   the TV (or let the kiosk do it). It lands on a chooser — **🃏 Party Games
-  or 🕹️ Retro Games** — then the hub, lobbies, and every game render there
-  in 3D (three.js, bundled locally, works fully offline).
-- **Phones are controllers with a private screen.** Your hand of cards, your
-  bets, your secret role — those live on your phone, Wii-U-gamepad style.
-  In arcade games the phone becomes a touch gamepad.
+  or 🕹️ Retro Games** — then the hub, lobbies, and every game's shared
+  table render there (crisp 2D, works fully offline).
+- **Phones are controllers with a private screen.** Your hand of cards and
+  your bets live on your phone, Wii-U-gamepad style — cards stacked in a
+  vertical cascade so the whole hand is readable at a glance.
 - **Bluetooth controllers work everywhere.** Pair any standard controller
   with the Pi (see below), press any button, and you're a player. Menus for
   your turn pop up on the TV: **A** choose · **B** back · **X** start/resume ·
   **Y** peek at your hand · **Start** pause / exit. One honest physics note:
   a single shared screen can't keep card hands truly secret — controller
-  players "peek" their fanned hand on the TV for a few seconds, so deal
+  players "peek" their hand on the TV for a few seconds, so deal
   phones to the poker sharks and pads to everyone else.
 - **Bots fill seats.** Start any game solo and bots take the empty chairs.
   If someone's phone dies mid-game, the host can hand their seat to a bot —
@@ -43,10 +34,8 @@ repo is safe to share and host.
   and a **SAVED** badge appears on the game tile; resume whenever —
   returning players are matched by name, missing ones become bots.
 - **Every game can be exited mid-play, from any player's device.** On a
-  phone: the **💾 Exit** button (turn-based) or the **✕** on the touch
-  gamepad (arcade). On a controller: **Start** opens the pause menu with
-  **Save & exit** (turn-based) or **End game** (arcade). Turn-based exits
-  auto-save; arcade matches just end.
+  phone: the **💾 Exit** button. On a controller: **Start** opens the pause
+  menu with **Save & exit**. Exits auto-save.
 - **Reconnect-proof.** Phones that lock or drop Wi-Fi re-join their seat
   automatically; controller players survive a TV reload.
 
@@ -110,11 +99,9 @@ On Raspberry Pi OS **Lite** there's no browser to run, so the kiosk is
 skipped — open `http://party-station.local/tv` in any browser on a smart
 TV, Fire stick, or a laptop plugged into the TV instead.
 
-> **Pi 4 (2GB) note:** the server itself is tiny, and the 3D scenes are tuned
-> for the Pi's GPU (low-poly procedural assets, pixel ratio 1, scenes only
-> re-render when something changes). Keep the kiosk to its one Chromium tab —
-> that's the normal setup and fits in 2GB. If a TV browser has no WebGL at
-> all, the screen degrades to a text notice while play continues on phones.
+> **Pi 4 (2GB) note:** the server itself is tiny and the TV view is plain
+> DOM — no WebGL required. Keep the kiosk to its one Chromium tab — that's
+> the normal setup and fits in 2GB.
 
 Android phones resolve `.local` names in modern versions; if a device can't,
 use the Pi's IP address (shown in the app's Settings sheet and in
@@ -125,10 +112,11 @@ use the Pi's IP address (shown in the app's Settings sheet and in
 The party games play synthesized console sounds from the TV — menu blips,
 a game-start chime, a ding when it's a human's turn, a game-over fanfare.
 No audio files involved, so it works fully offline. Retro games get their
-sound from RetroArch. If the TV is silent in both, the Pi's audio output
-is probably pointed at the wrong device: on the Pi desktop right-click
-the volume icon and pick the TV's HDMI output (or `sudo raspi-config` →
-System Options → Audio).
+sound from RetroArch. **The station points the Pi's audio at HDMI
+automatically at boot** (it finds the HDMI output in the desktop session
+and makes it the default), so sound comes out of the TV. If you *want* a
+different output (external speakers on the jack), pick it on the Pi
+desktop after boot — the station only sets the default once per boot.
 
 ## Troubleshooting from a keyboard
 
@@ -217,19 +205,17 @@ Party Station on the planet (well, in your house) picks it up.
 
 ## Adding a game
 
-1. **Server engine** — `server/games/<category>/<id>.js` exporting:
+1. **Server engine** — `server/games/cards/<id>.js` exporting:
    - `meta` — id, name, icon, category, min/max players, `mode: 'server'`
-     (turn-based, engine runs on the Pi) or `'relay'` (real-time, sim runs in
-     the TV browser and phones stream inputs), plus lobby `options`.
-   - for `server` games: `create({seats, options})` / `restore(ctx, state)`
+     (turn-based, engine runs on the Pi), plus lobby `options`.
+   - `create({seats, options})` / `restore(ctx, state)`
      returning `{ state, pub(), priv(seat), act(seat, action), botAct(seat),
      awaiting(), over() }`. Keep `state` JSON-serializable — that's what gets
      auto-saved.
 2. **Client module** — `public/js/games/<id>.js` exporting:
    - `player` — the phone controller view (touch UI + private info),
-   - `tv` — `mount(holder, ctx) → { update(ctx), dispose(), rehome(el) }`
-     building the 3D scene from `public/js/three-app/` helpers (or
-     `start(holder, ctx)` for real-time relay sims),
+   - `tv` — the shared TV view; wrap a per-sync render function with
+     `tv2d(render, { peekCards })` from `public/js/ui.js`,
    - `padChoices(ctx, stage)` — the controller menu for each decision, which
      is what makes the game playable with a Bluetooth pad.
 3. Register it in `server/registry.js`.
@@ -261,11 +247,9 @@ time, seat management, bot scheduling, saves, reconnects.
 
 ## Architecture in one breath
 
-Phones and the TV hold a WebSocket to the Pi. The server owns all game state
-for turn-based games; the TV renders it in 3D and phones render private
-views + controls. Bluetooth controllers are read by the TV via the Gamepad
-API and act through server-side "pad player" records that live on the TV's
-connection — so pads and phones are interchangeable seats. The two real-time
-arcade games run their simulation in the TV's browser at 60fps (phone inputs
-relayed over the socket, pads polled locally). State snapshots land in
-`data/saves/*.json` after every action, debounced.
+Phones and the TV hold a WebSocket to the Pi. The server owns all game
+state; the TV renders the shared table and phones render private views +
+controls. Bluetooth controllers are read by the TV via the Gamepad API and
+act through server-side "pad player" records that live on the TV's
+connection — so pads and phones are interchangeable seats. State snapshots
+land in `data/saves/*.json` after every action, debounced.

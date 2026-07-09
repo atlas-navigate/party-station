@@ -9,6 +9,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { WebSocketServer } from 'ws';
 import { handleConnection, isIdle, notifyClients } from './lobby.js';
+import { defaultAudioToHdmi } from './audio.js';
 import * as emulator from './emulator.js';
 import { romsRouter, startIncomingSorter } from './roms.js';
 import * as updater from './updater.js';
@@ -85,3 +86,4 @@ server.listen(PORT, () => {
 
 updater.init({ isIdle, onStatusChange: notifyClients });
 startIncomingSorter({ onChange: () => { emulator.scan(true); notifyClients(); } });
+defaultAudioToHdmi();

@@ -1,6 +1,4 @@
-import { h, mount, cardEl } from '../ui.js';
-import { cardTable } from '../three-app/cardtable.js';
-import { makeCard } from '../three-app/assets.js';
+import { h, mount, cardEl, tv2d } from '../ui.js';
 
 const CHIP_VALUES = [10, 25, 50, 100];
 
@@ -66,39 +64,37 @@ export const player = {
   },
 };
 
-export const tv = {
-  mount(holder, ctx) {
-    return cardTable(holder, ctx, {
-      turnSeat: c => c.pub.phase === 'play' ? c.pub.turn : -1,
-      // Blackjack hands are public: lay them face-up in front of each seat.
-      seatCards: (c, i) => ({ faces: c.pub.hands[i] || [] }),
-      seatSub: (c, i) => {
-        const pub = c.pub;
-        const r = pub.phase === 'payout' ? pub.results[i] : null;
-        const v = pub.values[i] != null ? `${pub.values[i]} · ` : '';
-        if (r) return `${v}${r.label} ${r.delta > 0 ? '+' : ''}${r.delta} · 🪙${pub.bank[i]}`;
-        return `${v}bet ${pub.bets[i] || '—'} · 🪙${pub.bank[i]}`;
-      },
-      centerKey: c => JSON.stringify([c.pub.dealer, c.pub.phase, c.pub.round, c.pub.turn]),
-      center(c, C) {
-        const pub = c.pub;
-        C.label('DEALER', { y: 2.3, z: -1.2, size: 22 });
-        const row = pub.dealer.length ? pub.dealer : [];
-        row.forEach((code, k) => {
-          const m = makeCard(code === 'back' ? 'back' : code);
-          m.position.set((k - (row.length - 1) / 2) * 0.7, 0.05, -1.1);
-          if (code === 'back') m.rotation.y = Math.PI;
-          C.group.add(m);
-        });
-        if (pub.dealerValue != null) {
-          C.label(`${pub.dealerValue}${pub.dealerValue > 21 ? ' — BUST 💥' : ''}`,
-            { y: 1.5, z: -1.2, size: 26, bg: pub.dealerValue > 21 ? '#ff5d73' : '#10121fcc' });
-        }
-        if (pub.phase === 'bet') C.label('Place your bets…', { y: 0.6, size: 26, bg: '#ffb52e' });
-      },
-    });
-  },
-};
+export const tv = tv2d((el, ctx) => {
+  const { pub, seats } = ctx;
+  mount(el,
+    h('div', { style: 'width:100%;max-width:1200px' },
+      h('div', { class: 'center', style: 'margin-bottom:26px' },
+        h('div', { class: 'eyebrow', style: 'font-size:15px;margin-bottom:8px' }, 'Dealer'),
+        h('div', { class: 'row', style: 'justify-content:center' },
+          pub.dealer.map(c => cardEl(c, { size: 'lg', button: false }))),
+        pub.dealerValue != null && h('div', { style: 'font-size:26px;font-weight:800;margin-top:6px' },
+          pub.dealerValue, pub.dealerValue > 21 ? ' — BUST 💥' : ''),
+        pub.phase === 'bet' && h('div', { class: 'banner hot', style: 'display:inline-block;margin-top:10px' }, 'Place your bets…'),
+      ),
+      h('div', { class: 'row wrap', style: 'justify-content:center;gap:16px' },
+        seats.map((s, i) => {
+          const r = pub.phase === 'payout' ? pub.results[i] : null;
+          return h('div', {
+            class: 'banner center',
+            style: 'min-width:190px' + (pub.turn === i ? ';box-shadow:0 4px 0 var(--marquee-edge),0 0 24px #ffb52e66' : '')
+              + (pub.sittingOut[i] ? ';opacity:.4' : ''),
+          },
+            h('div', {}, (s.bot ? '🤖 ' : '') + s.name),
+            h('div', { class: 'row', style: 'justify-content:center;margin:8px 0;min-height:60px' },
+              (pub.hands[i] || []).map(c => cardEl(c, { size: 'sm', button: false }))),
+            h('div', { class: 'dim', style: 'font-size:16px' },
+              pub.values[i] != null ? `${pub.values[i]} · ` : '', `bet ${pub.bets[i] || '—'} · 🪙 ${pub.bank[i]}`),
+            r && h('div', { style: `font-weight:800;margin-top:4px;color:${r.delta > 0 ? 'var(--marquee)' : r.delta < 0 ? 'var(--danger)' : 'var(--chalk-dim)'}` },
+              `${r.label} ${r.delta > 0 ? '+' : ''}${r.delta}`),
+          );
+        })),
+    ));
+});
 
 export function padChoices({ pub, priv, seat }) {
   if (pub.phase === 'bet' && priv.betting) {

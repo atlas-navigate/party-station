@@ -128,6 +128,10 @@
         lib.systems.map(s => h('option', { value: s.id, selected: s.id === item.system }, s.name)));
     }
 
+    function hasPs1Bios() {
+      return (lib.bios || []).some(f => /^(scph[\w-]+\.bin|psxonpsp660\.bin|ps1_rom\.bin)$/i.test(f));
+    }
+
     function render() {
       if (!lib) return;
       const input = h('input', {
@@ -174,9 +178,18 @@
               h('button', { class: 'tok small danger', onclick: () => confirmDelete(sys, f.file) }, '🗑')))))),
         lib.systems.every(s => !s.files.length)
           && h('p', { class: 'dim center', style: 'font-size:14px' }, 'No ROMs yet — drop some in above.'),
+        lib.pending?.length ? h('div', { style: 'margin-bottom:14px' },
+          h('div', { class: 'eyebrow', style: 'margin-bottom:8px' }, `⏳ Not sorted yet (${lib.pending.length})`),
+          h('div', { class: 'stack', style: 'gap:6px' }, lib.pending.map(f =>
+            h('div', { class: 'rom-row' }, h('span', { class: 'name' }, f)))),
+          h('p', { class: 'dim', style: 'font-size:12px;margin-top:6px' },
+            'These files in roms/incoming weren’t recognized (or are still copying). ',
+            'Unrecognized files stay here instead of showing up as playable games.')) : null,
         h('div', { class: 'banner', style: 'font-size:12px;margin-top:10px' },
-          'Only add games you legally own. Arcade .zip files must match the MAME 2003-Plus (0.78) ROM set. ',
-          'PlayStation games may also need a BIOS file in ~/RetroPie/BIOS on the Pi.'),
+          hasPs1Bios()
+            ? `✅ PS1 BIOS installed (${lib.bios.join(', ')}) — PlayStation games are good to go.`
+            : '💿 PlayStation games need a BIOS file (e.g. scph1001.bin) — drop it here like any ROM and it lands in ~/RetroPie/BIOS.',
+          ' Only add games you legally own. Arcade .zip files must match the MAME 2003-Plus (0.78) ROM set.'),
       ));
     }
 

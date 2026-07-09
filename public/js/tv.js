@@ -95,16 +95,15 @@ function handlePad(pad, btn, isRepeat) {
 }
 
 // Hub entries grouped into visual rows (retro: one row per system; party:
-// one row per category) so the cursor moves the way the screen looks.
+// one row of card games) so the cursor moves the way the screen looks.
 function hubGroups() {
   if (tvMode === 'retro') {
     return (sync.emu?.systems || []).map(s =>
       s.games.map(gm => ({ kind: 'emu', system: s.id, sysName: s.name, icon: s.icon, file: gm.file, title: gm.title })));
   }
   if (tvMode === 'party') {
-    return ['cards', 'board', 'arcade']
-      .map(c => sync.games.filter(g => g.category === c).map(g => ({ kind: 'game', g })))
-      .filter(row => row.length);
+    const row = sync.games.map(g => ({ kind: 'game', g }));
+    return row.length ? [row] : [];
   }
   return [];
 }
@@ -328,25 +327,24 @@ function hubScreen() {
   if (tvMode === null) return chooseScreen();
   if (tvMode === 'retro') return retroHubScreen();
   const list = hubList();
-  const cats = [['cards', 'CARD GAMES'], ['board', 'BOARD GAMES'], ['arcade', 'ARCADE']];
   return h('div', { class: 'tv-stage' },
     h('div', { class: 'tv-top' }, wordmark(44), urlBox()),
     h('div', { style: 'flex:1;overflow:hidden' },
-      cats.map(([c, label]) => h('div', { style: 'margin-bottom:16px' },
-        h('div', { class: 'eyebrow', style: 'font-size:14px;margin-bottom:8px' }, label),
+      h('div', { style: 'margin-bottom:16px' },
+        h('div', { class: 'eyebrow', style: 'font-size:14px;margin-bottom:8px' }, 'CARD GAMES'),
         h('div', { class: 'row wrap', style: 'gap:10px' },
-          list.filter(e => e.g.category === c).map(e => {
+          list.map(e => {
             const g = e.g;
             const focused = list.indexOf(e) === hubCursor;
             return h('div', {
-              class: `game-tile cat-${c}` + (focused ? ' tv-focus' : ''),
+              class: 'game-tile cat-cards' + (focused ? ' tv-focus' : ''),
               style: 'min-height:0;padding:10px 14px;flex-direction:row;align-items:center;gap:10px;cursor:default',
             },
               h('span', { style: 'font-size:26px' }, g.icon),
               h('div', {},
                 h('div', { class: 'g-name', style: 'font-size:16px' }, g.name, sync.saves[g.id] ? ' 💾' : ''),
                 h('div', { class: 'g-sub' }, `${g.minPlayers === g.maxPlayers ? g.minPlayers : g.minPlayers + '–' + g.maxPlayers} players`)));
-          })))),
+          }))),
     ),
     h('div', { class: 'tv-seats', style: 'margin:6px 0' },
       sync.players.length
@@ -360,7 +358,7 @@ function hubScreen() {
 function chooseScreen() {
   const emuGames = (sync.emu?.systems || []).reduce((n, s) => n + s.games.length, 0);
   const tiles = [
-    { icon: '🃏', name: 'Party Games', sub: 'Cards · Board · Arcade — phones and controllers', cls: 'cat-cards', mode: 'party' },
+    { icon: '🃏', name: 'Party Games', sub: 'Card games — phones and controllers', cls: 'cat-cards', mode: 'party' },
     {
       icon: '🕹️', name: 'Retro Games', cls: 'cat-arcade', mode: 'retro',
       sub: sync.emu?.available ? `${emuGames} classics on the emulator` : `Add ROMs at http://${location.host}/roms`,

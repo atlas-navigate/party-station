@@ -1,6 +1,4 @@
-import { h, mount, handStrip } from '../ui.js';
-import { cardTable } from '../three-app/cardtable.js';
-import { makeCard } from '../three-app/assets.js';
+import { h, mount, handStrip, tv2d } from '../ui.js';
 
 const RANK_WORD = { A: 'Aces', K: 'Kings', Q: 'Queens', J: 'Jacks', T: '10s' };
 const rankWord = r => RANK_WORD[r] || r + 's';
@@ -48,33 +46,27 @@ export const player = {
   },
 };
 
-export const tv = {
-  mount(holder, ctx) {
-    return cardTable(holder, ctx, {
-      turnSeat: c => c.pub.phase === 'play' ? c.pub.turn : -1,
-      seatCards: (c, i) => ({ count: c.pub.handCounts[i] }),
-      peekCards: (c, i) => c.privOf(i)?.hand || [],
-      seatSub: (c, i) => `${c.pub.books[i].length} 📚 ${c.pub.books[i].map(rankWord).join(' ')}`,
-      centerKey: c => JSON.stringify([c.pub.deckCount, c.pub.log, c.pub.turn]),
-      center(c, C) {
-        const pub = c.pub;
-        // The pond: a loose pile of face-down cards.
-        const piles = Math.min(7, Math.max(1, Math.round(pub.deckCount / 6)));
-        for (let k = 0; k < piles; k++) {
-          const m = makeCard('back');
-          const a = (k / piles) * Math.PI * 2;
-          m.position.set(Math.cos(a) * 0.5, 0.03 + (k % 3) * 0.015, Math.sin(a) * 0.35);
-          m.rotation.y = Math.PI;
-          m.rotation.z = a;
-          C.group.add(m);
-        }
-        C.label(`🌊 ${pub.deckCount} in the pond`, { y: 2.5, size: 24 });
-        const last = pub.log.slice(-2);
-        last.forEach((e, k) => C.label(logLine(e, c.seats), { y: 1.7 - k * 0.42, size: 21 }));
-      },
-    });
-  },
-};
+export const tv = tv2d((el, ctx) => {
+  const { pub, seats } = ctx;
+  mount(el,
+    h('div', { style: 'width:100%;max-width:1100px' },
+      h('div', { class: 'center', style: 'margin-bottom:24px' },
+        h('div', { style: 'font-size:26px' }, `🌊 Pond: ${pub.deckCount} cards`)),
+      h('div', { class: 'row wrap', style: 'justify-content:center;gap:18px' },
+        seats.map((s, i) => h('div', {
+          class: 'banner', style: 'min-width:220px' + (pub.turn === i ? ';box-shadow:0 4px 0 var(--marquee-edge),0 0 24px #ffb52e55' : ''),
+        },
+          h('div', { class: 'spread' },
+            h('span', {}, (s.bot ? '🤖 ' : '') + s.name),
+            h('span', { class: 'numpill' }, `${pub.handCounts[i]} 🂠`)),
+          h('div', { style: 'font-size:24px;margin-top:6px;min-height:32px' },
+            pub.books[i].length ? pub.books[i].map(r => '📕').join('') : h('span', { class: 'dim', style: 'font-size:15px' }, 'no books yet'),
+            h('span', { class: 'dim', style: 'font-size:15px' }, pub.books[i].length ? `  ${pub.books[i].map(rankWord).join(', ')}` : '')),
+        ))),
+      h('div', { class: 'log center', style: 'margin-top:26px;font-size:19px' },
+        pub.log.map(e => h('div', {}, logLine(e, seats)))),
+    ));
+}, { peekCards: (ctx, seat) => ctx.privOf(seat)?.hand });
 
 export function padChoices({ pub, priv, seat, seats }, stage) {
   if (pub.phase !== 'play' || pub.turn !== seat) return null;

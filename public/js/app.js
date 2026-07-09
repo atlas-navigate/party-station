@@ -37,10 +37,6 @@ async function loadModule(id) {
   return modules[id];
 }
 
-function catName(c) {
-  return { cards: 'Card Games', board: 'Board Games', arcade: 'Arcade', cabinet: '🕹️ Cabinet' }[c] || c;
-}
-
 // ---------------------------------------------------------------- screens
 
 function joinScreen() {
@@ -83,7 +79,7 @@ function chooseScreen() {
     },
       h('span', { class: 'g-icon' }, '🃏'),
       h('span', { class: 'g-name' }, 'Party Games'),
-      h('span', { class: 'g-sub' }, 'Cards · Board · Arcade — phones and controllers')),
+      h('span', { class: 'g-sub' }, 'Card games — phones and controllers')),
     h('button', {
       class: 'game-tile cat-arcade', style: 'min-height:110px',
       onclick: () => { hubMode = 'retro'; render(); },
@@ -111,19 +107,11 @@ function hubTopbar(title) {
 
 function hubScreen() {
   if (hubMode === 'retro') return retroScreen();
-  const cats = ['cards', 'board', 'arcade'];
-  let cat = localStorage.getItem('ps-cat') || 'cards';
-  if (!cats.includes(cat)) cat = 'cards';
-  const games = sync.games.filter(g => g.category === cat);
+  const games = sync.games;
   return h('div', { class: 'screen' },
     hubTopbar('Pick a game'),
     sync.tvCount === 0 && h('div', { class: 'banner', style: 'margin-bottom:12px;font-size:13px;' },
       '📺 No big screen yet — open ', h('b', {}, location.host + '/tv'), ' on the TV for the full experience.'),
-    h('div', { class: 'cat-tabs' }, cats.map(c =>
-      h('button', {
-        class: 'tok' + (c === cat ? ' on-' + c : ''),
-        onclick: () => { localStorage.setItem('ps-cat', c); render(); },
-      }, catName(c)))),
     h('div', { class: 'game-grid' }, games.map(g => {
       const save = sync.saves[g.id];
       return h('button', { class: `game-tile cat-${g.category}`, onclick: () => gameSheet(g, save) },

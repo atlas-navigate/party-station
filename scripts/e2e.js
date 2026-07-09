@@ -1,6 +1,6 @@
 // End-to-end smoke test over a real WebSocket connection:
-//   two phones + a TV join, play Candy Dash to completion, exercise
-//   save & resume, then run a relay (arcade) session start/end.
+//   two phones + a TV join, play Crazy 8s to completion, and exercise
+//   save & resume plus the controller (pad) player flow.
 // Usage: PORT=8090 node scripts/e2e.js   (expects the server already running)
 import WebSocket from 'ws';
 
@@ -44,14 +44,28 @@ const alice = client('player', 'Alice');
 const bob = client('player', 'Bob');
 const tv = client('tv');
 
-// Autoplay: whenever it's our turn in Candy Dash, draw (at human-ish pace so
-// the save/quit step below happens mid-game, not after it already ended).
+// A legal Crazy 8s move from a sync snapshot: play the first legal card
+// (calling spades on an 8), else draw while allowed, else pass.
+function crazy8sMove(pub, priv) {
+  if (priv?.legal?.length) {
+    const card = priv.legal[0];
+    return card[0] === '8' ? { t: 'play', card, suit: 's' } : { t: 'play', card };
+  }
+  if (pub.drawn < pub.maxDraws && pub.deckCount > 0) return { t: 'draw' };
+  return { t: 'pass' };
+}
+
+// Autoplay: whenever it's our turn in Crazy 8s, make a legal move (at
+// human-ish pace so the save/quit step below happens mid-game, not after
+// it already ended).
 for (const c of [alice, bob]) {
   c.onSync(s => {
-    if (s.phase === 'game' && s.game?.gameId === 'candydash'
+    if (s.phase === 'game' && s.game?.gameId === 'crazy8s'
       && s.game.awaiting?.includes(s.game.yourSeat)) {
       setTimeout(() => {
-        if (c.sync.phase === 'game') c.send({ t: 'act', a: { t: 'draw' } });
+        const g = c.sync.game; // re-read: the state may have moved on
+        if (c.sync.phase !== 'game' || !g.awaiting?.includes(g.yourSeat)) return;
+        c.send({ t: 'act', a: crazy8sMove(g.pub, g.priv) });
       }, 250); // slow enough that even a lucky short game outlives the 500ms save test
     }
   });
@@ -61,7 +75,7 @@ await waitFor(alice, s => s.phase === 'hub', 'hub');
 await waitFor(tv, s => s.phase === 'hub');
 ok('all clients connected, hub visible');
 
-alice.send({ t: 'openLobby', gameId: 'candydash' });
+alice.send({ t: 'openLobby', gameId: 'crazy8s' });
 await waitFor(bob, s => s.phase === 'lobby');
 bob.send({ t: 'joinLobby' });
 await waitFor(alice, s => s.lobby?.seats.length === 2);
@@ -77,28 +91,13 @@ if (alice.sync.phase !== 'game') throw new Error('game ended before the save tes
 alice.send({ t: 'quitGame' });
 await waitFor(alice, s => s.phase === 'hub');
 await sleep(600); // allow the debounced save to flush
-alice.send({ t: 'resumeGame', gameId: 'candydash' });
+alice.send({ t: 'resumeGame', gameId: 'crazy8s' });
 const resumed = await waitFor(alice, s => s.phase === 'game');
-if (resumed.game.gameId !== 'candydash') throw new Error('resume loaded wrong game');
+if (resumed.game.gameId !== 'crazy8s') throw new Error('resume loaded wrong game');
 ok('save & resume works');
 
 await waitFor(alice, s => s.phase === 'gameover');
-ok(`candy dash finished: ${alice.sync.game.over?.title}`);
-alice.send({ t: 'backToHub' });
-await waitFor(alice, s => s.phase === 'hub');
-
-// Relay flow: solo Slam City with the TV ending the game.
-tv.relayInput = () => {};
-alice.send({ t: 'openLobby', gameId: 'slamcity' });
-await waitFor(alice, s => s.phase === 'lobby');
-alice.send({ t: 'start' });
-await waitFor(tv, s => s.phase === 'game' && s.game?.mode === 'relay');
-ok('relay game started, TV notified');
-alice.send({ t: 'input', d: { k: 'right', v: true } });
-await sleep(150);
-tv.send({ t: 'relayEnd', result: { title: 'Test buzzer', lines: [] } });
-await waitFor(alice, s => s.phase === 'gameover');
-ok('relay game ended by TV');
+ok(`crazy 8s finished: ${alice.sync.game.over?.title}`);
 alice.send({ t: 'backToHub' });
 await waitFor(bob, s => s.phase === 'hub');
 ok('back to hub');
@@ -108,15 +107,17 @@ ok('back to hub');
 tv.send({ t: 'padHello', pad: 0, name: 'PadOne' });
 await waitFor(tv, s => s.pads && s.pads[0]);
 ok('pad player joined via TV');
-tv.send({ t: 'padMsg', pad: 0, m: { t: 'openLobby', gameId: 'candydash' } });
+tv.send({ t: 'padMsg', pad: 0, m: { t: 'openLobby', gameId: 'crazy8s' } });
 await waitFor(tv, s => s.phase === 'lobby');
 tv.send({ t: 'padMsg', pad: 0, m: { t: 'start' } }); // bots fill the second seat
 await waitFor(tv, s => s.phase === 'game' && s.pads[0].seat >= 0);
 ok('pad player seated in game');
 const padAuto = s => {
-  if (s.phase === 'game' && s.game?.gameId === 'candydash' && s.pads?.[0]?.awaited) {
+  if (s.phase === 'game' && s.game?.gameId === 'crazy8s' && s.pads?.[0]?.awaited) {
     setTimeout(() => {
-      if (tv.sync.phase === 'game') tv.send({ t: 'padMsg', pad: 0, m: { t: 'act', a: { t: 'draw' } } });
+      const cur = tv.sync;
+      if (cur.phase !== 'game' || !cur.pads?.[0]?.awaited) return;
+      tv.send({ t: 'padMsg', pad: 0, m: { t: 'act', a: crazy8sMove(cur.game.pub, cur.pads[0].priv) } });
     }, 40);
   }
 };
@@ -140,7 +141,7 @@ ok('hearts auto-filled with 3 bots');
 bob.send({ t: 'quitGame' });
 await waitFor(bob, s => s.phase === 'hub');
 bob.send({ t: 'deleteSave', gameId: 'hearts' });
-bob.send({ t: 'deleteSave', gameId: 'candydash' });
+bob.send({ t: 'deleteSave', gameId: 'crazy8s' });
 ok('cleanup done');
 
 // Cabinet (RetroArch) flow — runs only when the server sees an emulator
@@ -223,6 +224,16 @@ if (alice.sync.emu?.available) {
   }
   ok('zipped PS1 .chd unpacked with correct bytes (deflate)');
 
+  // PS1 .iso dumps: routed bare, and unpacked out of zips.
+  r = await (await upload('Blitz Port (USA).iso')).json();
+  if (r.system !== 'psx') throw new Error('.iso did not route to psx: ' + JSON.stringify(r));
+  r = await (await fetch(`${base}/api/roms?name=${encodeURIComponent('Zipped ISO.zip')}&system=auto`,
+    { method: 'POST', body: zipOf('Zipped ISO.iso', Buffer.from('FAKE-ISO-BYTES')) })).json();
+  if (r.system !== 'psx' || r.file !== 'Zipped ISO.iso') {
+    throw new Error('zipped .iso was not unpacked to psx: ' + JSON.stringify(r));
+  }
+  ok('PS1 .iso routed to psx (bare + zipped)');
+
   r = await (await fetch(`${base}/api/roms?name=${encodeURIComponent('Catan Test.zip')}&system=auto`,
     { method: 'POST', body: zipOf('Catan Test.nds', Buffer.from('NDSDATA')) })).json();
   if (!r.err || !r.err.includes('Nintendo DS')) {
@@ -268,6 +279,7 @@ if (alice.sync.emu?.available) {
   for (const [sys, file] of [['snes', 'Super Test (USA).sfc'], ['arcade', 'coinop.zip'],
                              ['snes', 'console game.zip'], ['nes', 'Dropped Game.nes'],
                              ['gb', 'Monopoly Test.gb'], ['psx', 'Blitz Test.chd'],
+                             ['psx', 'Blitz Port (USA).iso'], ['psx', 'Zipped ISO.iso'],
                              ['gbc', 'Stale Page.gbc']]) {
     await fetch(`${base}/api/roms/${sys}/${encodeURIComponent(file)}`, { method: 'DELETE' });
   }
