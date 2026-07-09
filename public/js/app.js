@@ -10,9 +10,18 @@ const modules = {};         // gameId -> loaded client module
 let padActive = false;
 let hubMode = null;         // landing choice: 'party' | 'retro' (asked once per visit)
 
+// After a self-update the server restarts with new client code; reload
+// idle phones so they don't keep driving it with the old bundle.
+let loadedVersion = null;
+function reloadOnNewVersion(s) {
+  if (!s.version) return;
+  if (loadedVersion === null) loadedVersion = s.version;
+  else if (s.version !== loadedVersion && s.phase === 'hub' && !s.emulator) location.reload();
+}
+
 const net = connect({
   role: 'player',
-  onSync: s => { sync = s; render(); },
+  onSync: s => { sync = s; reloadOnNewVersion(s); render(); },
   onMsg: m => {
     if (m.t === 'toast') toast(m.text);
     if (m.t === 'nope') toast(m.text, true);
@@ -233,6 +242,8 @@ function settingsSheet() {
       h('div', { class: 'divider' }),
       h('div', { class: 'eyebrow' }, 'Software'),
       h('p', { class: 'dim', style: 'font-size:14px' }, `Version: ${sync.version || 'unknown'}`),
+      sync.updateError && h('p', { class: 'dim', style: 'font-size:13px;color:var(--bad,#e66)' },
+        `⚠️ Last update check failed: ${sync.updateError}`),
       sync.updating
         ? h('div', { class: 'banner hot' }, 'Updating… the station will restart itself.')
         : sync.updateAvailable

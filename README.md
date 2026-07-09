@@ -179,8 +179,13 @@ The station updates itself from this repo:
 
 - Every 15 minutes it runs `git fetch`; when `origin/main` is ahead **and
   nobody is mid-game**, it pulls, reinstalls dependencies, and restarts.
-- You can also trigger it manually: phone → ⚙️ Settings → **Install update
-  now**.
+  Idle phones and the TV notice the version change and reload themselves,
+  so the new UI actually appears without touching anything.
+- You can also trigger it manually: phone → ⚙️ Settings → **Check for
+  updates** / **Install update now**. The check always answers — "up to
+  date", "update available", or the actual error if it failed.
+- Debugging: `curl http://party-station.local/api/status` reports the
+  running version, the last check time, and any update error.
 
 So the release process is just: merge/push to `main` on GitHub, and every
 Party Station on the planet (well, in your house) picks it up.

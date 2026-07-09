@@ -40,6 +40,9 @@ app.get('/api/status', (_req, res) => res.json({
   ok: true,
   version: updater.status.version,
   updateAvailable: updater.status.updateAvailable,
+  updating: updater.status.updating,
+  lastCheck: updater.status.lastCheck ? new Date(updater.status.lastCheck).toISOString() : null,
+  updateError: updater.status.error,
 }));
 
 const server = http.createServer(app);

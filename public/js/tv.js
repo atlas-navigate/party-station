@@ -18,9 +18,19 @@ const menus = new Map();   // pad index -> {seat, stage, idx, spec}
 const peeked = new Set();  // seat indexes currently revealing their hand (Y)
 const peekTimers = new Map();
 
+// A finished self-update restarts the server with new client code, but the
+// kiosk's Chromium never reloads by itself — so when the version changes
+// under us (and we're idle), reload to actually run the new UI.
+let loadedVersion = null;
+function reloadOnNewVersion(s) {
+  if (!s.version) return;
+  if (loadedVersion === null) loadedVersion = s.version;
+  else if (s.version !== loadedVersion && s.phase === 'hub' && !s.emulator) location.reload();
+}
+
 const net = connect({
   role: 'tv',
-  onSync: s => { sync = s; render(); },
+  onSync: s => { sync = s; reloadOnNewVersion(s); render(); },
   onMsg: m => {
     if (m.t === 'toast') toast(m.text);
     if (m.t === 'nope') toast(m.text, true);

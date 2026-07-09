@@ -57,6 +57,7 @@ function sharedState() {
     version: updater.status.version,
     updateAvailable: updater.status.updateAvailable,
     updating: updater.status.updating,
+    updateError: updater.status.error,
     emu: emulator.summary(),
     emulator: emulator.publicState(),
   };
@@ -443,7 +444,18 @@ function onPlayerMsg(p, m) {
       break;
     }
     case 'checkUpdate':
-      updater.check().then(() => broadcast()).catch(() => broadcast());
+      // Always answer — a silent "you're current" looks like a broken button.
+      updater.check()
+        .then(avail => {
+          sendTo(p, avail
+            ? { t: 'toast', text: '⬇️ Update available — install it from Settings' }
+            : { t: 'toast', text: `✅ Up to date — ${updater.status.version}` });
+          broadcast();
+        })
+        .catch(e => {
+          sendTo(p, { t: 'nope', text: 'Update check failed: ' + e.message });
+          broadcast();
+        });
       break;
     case 'applyUpdate':
       if (updater.status.updateAvailable) {
