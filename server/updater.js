@@ -52,14 +52,23 @@ export async function init({ isIdle, onStatusChange }) {
   setTimeout(tick, 30 * 1000); // first check shortly after boot
 }
 
-export async function check() {
-  await git(['fetch', 'origin', 'main']);
-  const local = await git(['rev-parse', 'HEAD']);
-  const remote = await git(['rev-parse', 'origin/main']);
-  status.updateAvailable = local !== remote;
-  status.lastCheck = Date.now();
-  status.error = null;
-  return status.updateAvailable;
+// Concurrent checks (the settings button + the 15-minute tick) race
+// git fetch on the same ref and one loses noisily — share one in-flight
+// check instead.
+let inFlight = null;
+export function check() {
+  if (!inFlight) {
+    inFlight = (async () => {
+      await git(['fetch', 'origin', 'main']);
+      const local = await git(['rev-parse', 'HEAD']);
+      const remote = await git(['rev-parse', 'origin/main']);
+      status.updateAvailable = local !== remote;
+      status.lastCheck = Date.now();
+      status.error = null;
+      return status.updateAvailable;
+    })().finally(() => { inFlight = null; });
+  }
+  return inFlight;
 }
 
 export async function apply() {
