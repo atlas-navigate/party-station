@@ -24,11 +24,15 @@ export const SYSTEMS = [
   { id: 'nes', name: 'NES', icon: '🎮', cores: ['fceumm_libretro.so', 'nestopia_libretro.so'], ext: ['.nes', '.zip'] },
   { id: 'snes', name: 'SNES', icon: '🎮', cores: ['snes9x_libretro.so', 'snes9x2010_libretro.so'], ext: ['.sfc', '.smc', '.zip'] },
   { id: 'megadrive', name: 'Genesis', icon: '🎮', cores: ['genesis_plus_gx_libretro.so', 'picodrive_libretro.so'], ext: ['.md', '.gen', '.bin', '.zip'] },
+  { id: 'mastersystem', name: 'Master System', icon: '🎮', cores: ['genesis_plus_gx_libretro.so', 'picodrive_libretro.so'], ext: ['.sms', '.zip'] },
+  { id: 'gamegear', name: 'Game Gear', icon: '🎮', cores: ['genesis_plus_gx_libretro.so'], ext: ['.gg', '.zip'] },
   { id: 'gb', name: 'Game Boy', icon: '🎮', cores: ['gambatte_libretro.so'], ext: ['.gb', '.zip'] },
   { id: 'gbc', name: 'Game Boy Color', icon: '🎮', cores: ['gambatte_libretro.so'], ext: ['.gbc', '.zip'] },
   { id: 'psx', name: 'PlayStation', icon: '💿', cores: ['pcsx_rearmed_libretro.so', 'duckstation_libretro.so'], ext: ['.cue', '.chd', '.pbp', '.m3u', '.iso', '.img'] },
   { id: 'n64', name: 'Nintendo 64', icon: '🎮', cores: ['mupen64plus_next_libretro.so', 'parallel_n64_libretro.so'], ext: ['.z64', '.n64', '.v64'] },
   { id: 'gba', name: 'Game Boy Advance', icon: '🎮', cores: ['mgba_libretro.so', 'gpsp_libretro.so'], ext: ['.gba'] },
+  { id: 'atari2600', name: 'Atari 2600', icon: '🕹️', cores: ['stella2014_libretro.so', 'stella_libretro.so'], ext: ['.a26'] },
+  { id: 'pcengine', name: 'TurboGrafx-16', icon: '🎮', cores: ['mednafen_pce_fast_libretro.so', 'mednafen_supergrafx_libretro.so'], ext: ['.pce'] },
 ];
 
 let retroarchBin = null;
@@ -99,6 +103,13 @@ export function scan(force = false) {
   }
   scanned = { at: Date.now(), systems };
   return systems;
+}
+
+// Whether the emulator + a core for this system exist on this machine —
+// lets the /roms page mark systems as ready vs "re-run setup for this one".
+export function coreAvailable(systemId) {
+  const sys = SYSTEMS.find(s => s.id === systemId);
+  return !!(sys && findRetroarch() && findCore(sys.cores));
 }
 
 export function summary() {

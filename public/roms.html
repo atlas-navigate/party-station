@@ -51,8 +51,15 @@
     }
 
     function enqueue(files) {
-      for (const f of files) {
-        const system = guessSystem(f.name);
+      // PS1 discs are a .cue plus .bin tracks: upload cues first so the
+      // server can route the .bins by their cue sheet instead of guessing
+      // Genesis from the bare extension.
+      const batch = [...files].sort((a, b) =>
+        (a.name.toLowerCase().endsWith('.cue') ? 0 : 1) - (b.name.toLowerCase().endsWith('.cue') ? 0 : 1));
+      const batchHasCue = batch.some(f => f.name.toLowerCase().endsWith('.cue'));
+      for (const f of batch) {
+        const isDiscTrack = batchHasCue && f.name.toLowerCase().endsWith('.bin');
+        const system = isDiscTrack ? 'psx' : guessSystem(f.name);
         // The guess is only for display — uploads say system=auto so the
         // server can look inside zips; explicit is set by the dropdown.
         queue.push({ file: f, system, explicit: false, pct: 0, status: system ? 'wait' : 'err', err: system ? null : 'Unknown file type' });
@@ -185,11 +192,25 @@
           h('p', { class: 'dim', style: 'font-size:12px;margin-top:6px' },
             'These files in roms/incoming weren’t recognized (or are still copying). ',
             'Unrecognized files stay here instead of showing up as playable games.')) : null,
+        h('div', { class: 'divider' }),
+        h('div', { class: 'eyebrow', style: 'margin-bottom:8px' }, '🕹️ Systems this console plays'),
+        h('div', { class: 'stack', style: 'gap:6px' }, lib.systems.map(s =>
+          h('div', { class: 'rom-row', style: s.ready ? '' : 'opacity:.55' },
+            h('span', {}, s.icon),
+            h('span', { class: 'name' }, s.name),
+            h('span', { class: 'dim', style: 'font-size:12px' }, s.ext.join(' ')),
+            h('span', { style: 'font-size:12px' }, s.ready ? '✅ ready' : '⬇️ needs setup'))),
+        ),
+        lib.systems.some(s => !s.ready) && h('p', { class: 'dim', style: 'font-size:12px;margin-top:6px' },
+          'Systems marked "needs setup" are supported, but their emulator isn’t installed yet — ',
+          're-run the setup one-liner on the Pi (it skips everything already installed): ',
+          h('b', {}, 'curl -fsSL https://raw.githubusercontent.com/atlas-navigate/party-station/main/scripts/setup-pi.sh | sudo bash')),
         h('div', { class: 'banner', style: 'font-size:12px;margin-top:10px' },
           hasPs1Bios()
-            ? `✅ PS1 BIOS installed (${lib.bios.join(', ')}) — PlayStation games are good to go.`
+            ? `✅ PS1 BIOS installed — PlayStation games are good to go.`
             : '💿 PlayStation games need a BIOS file (e.g. scph1001.bin) — drop it here like any ROM and it lands in ~/RetroPie/BIOS.',
-          ' Only add games you legally own. Arcade .zip files must match the MAME 2003-Plus (0.78) ROM set.'),
+          ' PS1 discs arrive as a .cue + .bin pair (or .iso/.chd) — drop all the files together. ',
+          'Only add games you legally own. Arcade .zip files must match the MAME 2003-Plus (0.78) ROM set.'),
       ));
     }
 

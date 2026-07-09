@@ -224,6 +224,36 @@ if (alice.sync.emu?.available) {
   }
   ok('zipped PS1 .chd unpacked with correct bytes (deflate)');
 
+  // PS1 cue+bin discs: a bare .bin defaults to Genesis, but once its cue
+  // sheet is in psx/ the tracks must follow it — including one that was
+  // uploaded (and misfiled) BEFORE the cue arrived.
+  r = await (await upload('Blitz Disc (USA) (Track 1).bin')).json();
+  if (r.system !== 'megadrive') throw new Error('.bin without a cue should default to megadrive: ' + JSON.stringify(r));
+  const cueText = 'FILE "Blitz Disc (USA) (Track 1).bin" BINARY\n  TRACK 01 MODE2/2352\n'
+    + 'FILE "Blitz Disc (USA) (Track 2).bin" BINARY\n  TRACK 02 AUDIO\n';
+  r = await (await upload('Blitz Disc (USA).cue', 'auto', cueText)).json();
+  if (r.system !== 'psx') throw new Error('.cue did not route to psx: ' + JSON.stringify(r));
+  r = await (await upload('Blitz Disc (USA) (Track 2).bin')).json();
+  if (r.system !== 'psx') throw new Error('.bin named by an existing cue should route to psx: ' + JSON.stringify(r));
+  if (romsDir) {
+    const { default: fsCue } = await import('fs');
+    const { default: pathCue } = await import('path');
+    if (!fsCue.existsSync(pathCue.join(romsDir, 'psx', 'Blitz Disc (USA) (Track 1).bin'))) {
+      throw new Error('cue arrival did not pull the misfiled track out of megadrive/');
+    }
+    if (fsCue.existsSync(pathCue.join(romsDir, 'megadrive', 'Blitz Disc (USA) (Track 1).bin'))) {
+      throw new Error('misfiled track still present in megadrive/');
+    }
+  }
+  ok('PS1 cue+bin discs stay together (cue rescues misfiled tracks)');
+
+  // New systems route by extension.
+  r = await (await upload('Sonic Test (USA).sms')).json();
+  if (r.system !== 'mastersystem') throw new Error('.sms did not route to mastersystem: ' + JSON.stringify(r));
+  r = await (await upload('Bonk Test (USA).pce')).json();
+  if (r.system !== 'pcengine') throw new Error('.pce did not route to pcengine: ' + JSON.stringify(r));
+  ok('Master System and TurboGrafx route by extension');
+
   // PS1 .iso dumps: routed bare, and unpacked out of zips.
   r = await (await upload('Blitz Port (USA).iso')).json();
   if (r.system !== 'psx') throw new Error('.iso did not route to psx: ' + JSON.stringify(r));
@@ -280,6 +310,9 @@ if (alice.sync.emu?.available) {
                              ['snes', 'console game.zip'], ['nes', 'Dropped Game.nes'],
                              ['gb', 'Monopoly Test.gb'], ['psx', 'Blitz Test.chd'],
                              ['psx', 'Blitz Port (USA).iso'], ['psx', 'Zipped ISO.iso'],
+                             ['psx', 'Blitz Disc (USA).cue'], ['psx', 'Blitz Disc (USA) (Track 1).bin'],
+                             ['psx', 'Blitz Disc (USA) (Track 2).bin'],
+                             ['mastersystem', 'Sonic Test (USA).sms'], ['pcengine', 'Bonk Test (USA).pce'],
                              ['gbc', 'Stale Page.gbc']]) {
     await fetch(`${base}/api/roms/${sys}/${encodeURIComponent(file)}`, { method: 'DELETE' });
   }

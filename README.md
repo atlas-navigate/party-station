@@ -76,9 +76,11 @@ That one command sets up the whole console, no menus to click through:
   and it shows the console; the kiosk waits for the server and relaunches
   the browser if it ever exits. The TV opens on a chooser — **🃏 Party
   Games or 🕹️ Retro Games** — navigable from a controller;
-- **RetroArch + emulator cores** (arcade, NES, SNES, Genesis, PS1) via
-  RetroPie's binary packages, so retro ROMs play out of the box. ROMs are
-  **never** included — add dumps of games you own afterwards (next section).
+- **RetroArch + emulator cores** (arcade, NES, SNES, Genesis, Master
+  System, Game Gear, Game Boy/Color/Advance, N64, PS1, Atari 2600,
+  TurboGrafx-16) via RetroPie's binary packages, so retro ROMs play out of
+  the box. ROMs are **never** included — add dumps of games you own
+  afterwards (next section).
 
 > **Retro Cabinet needs Bookworm:** RetroPie only ships prebuilt emulators
 > for Raspberry Pi OS 12 (Bookworm) and older — in the Raspberry Pi Imager
@@ -166,14 +168,20 @@ the Pi's HDMI output; Bluetooth controllers work in it natively (that's
 their home turf). Exit with **Select+Start** and Party Station takes the
 screen back — phones also get a force-quit button just in case.
 
-Installed systems: arcade (MAME), NES, SNES, Genesis, Game Boy, Game Boy
-Color, Game Boy Advance, and PS1. Want more (N64, …)? Install extra cores
-via `~/RetroPie-Setup/retropie_setup.sh`.
+Installed systems: arcade (MAME), NES, SNES, Genesis, Master System, Game
+Gear, Game Boy, Game Boy Color, Game Boy Advance, N64, PS1, Atari 2600,
+and TurboGrafx-16 — the `/roms` page lists them all with their file
+extensions and shows which emulators are actually installed on your Pi.
+Want something else? Install extra cores via
+`~/RetroPie-Setup/retropie_setup.sh`.
 
 Fine print: arcade `.zip`s must match the MAME 2003-Plus (0.78) ROM set —
 a zip from a newer MAME romset quits immediately (the station toasts a
 warning to every screen when that happens). PS1 games may need a BIOS
-file in `~/RetroPie/BIOS`. Arcade games boot to
+file in `~/RetroPie/BIOS`, and PS1 discs dumped as `.cue`+`.bin` must be
+dropped together — the station keeps the pair united (the cue sheet
+names its tracks, and any track that arrives first is moved to join it).
+`.7z` archives aren't supported — extract them first. Arcade games boot to
 an attract screen waiting for a quarter — tap **Select** to insert a coin,
 then **Start**. Controllers are recognized via the autoconfig pack the
 setup script installs, and the left analog stick doubles as the d-pad in

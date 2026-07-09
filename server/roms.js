@@ -6,7 +6,7 @@ import express from 'express';
 import fs from 'fs';
 import path from 'path';
 import zlib from 'zlib';
-import { ROMS_DIR, SYSTEMS } from './emulator.js';
+import { ROMS_DIR, SYSTEMS, coreAvailable } from './emulator.js';
 
 // One upload target per distinct ROM folder ('mame-libretro'/'fba' are
 // alternate arcade folders — 'arcade' is the canonical one).
@@ -18,9 +18,11 @@ const EXT_ROUTE = {
   '.nes': 'nes',
   '.sfc': 'snes', '.smc': 'snes',
   '.md': 'megadrive', '.gen': 'megadrive', '.bin': 'megadrive',
+  '.sms': 'mastersystem', '.gg': 'gamegear',
   '.cue': 'psx', '.chd': 'psx', '.pbp': 'psx', '.m3u': 'psx', '.iso': 'psx', '.img': 'psx',
   '.z64': 'n64', '.n64': 'n64', '.v64': 'n64',
   '.gba': 'gba',
+  '.a26': 'atari2600', '.pce': 'pcengine',
   '.zip': 'arcade',
 };
 
@@ -50,8 +52,10 @@ export function routeFor(filename) {
 const ZIP_INNER = {
   '.nes': 'nes', '.sfc': 'snes', '.smc': 'snes',
   '.md': 'megadrive', '.gen': 'megadrive',
+  '.sms': 'mastersystem', '.gg': 'gamegear',
   '.gb': 'gb', '.gbc': 'gbc', '.gba': 'gba',
   '.z64': 'n64', '.n64': 'n64', '.v64': 'n64',
+  '.a26': 'atari2600', '.pce': 'pcengine',
   '.chd': 'psx', '.pbp': 'psx', '.cue': 'psx', '.iso': 'psx', '.img': 'psx',
 };
 
@@ -218,6 +222,55 @@ export async function extractConsoleZip(src, entries) {
   return extracted;
 }
 
+// PS1 discs travel as a .cue sheet plus .bin track files, and a bare .bin
+// defaults to Genesis — so a disc dropped in the browser used to split:
+// cue → psx/, tracks → megadrive/. The cue sheet names its tracks; use that
+// to route .bins home, and to pull back any that were misfiled before their
+// cue existed (on cue arrival and once at boot).
+function cueTrackNames() {
+  const dir = path.join(ROMS_DIR, 'psx');
+  const wanted = new Set();
+  let cues = [];
+  try { cues = fs.readdirSync(dir).filter(f => f.toLowerCase().endsWith('.cue')); } catch {}
+  for (const cue of cues) {
+    wanted.add(cue.slice(0, -4).toLowerCase() + '.bin'); // same-basename convention
+    try {
+      const text = fs.readFileSync(path.join(dir, cue), 'utf8');
+      for (const m of text.matchAll(/FILE\s+"([^"]+)"/gi)) {
+        wanted.add(path.basename(m[1]).toLowerCase());
+      }
+    } catch {}
+  }
+  return wanted;
+}
+
+function psxCueWants(binName) {
+  return cueTrackNames().has(binName.toLowerCase());
+}
+
+// Only megadrive/ is swept: files there are complete (incoming/ may still be
+// mid-copy, and its sorter is already cue-aware).
+function rescueCueTracks(onChange) {
+  const wanted = cueTrackNames();
+  if (!wanted.size) return;
+  const dir = path.join(ROMS_DIR, 'megadrive');
+  let files = [];
+  try { files = fs.readdirSync(dir); } catch { return; }
+  let moved = false;
+  for (const f of files) {
+    if (!wanted.has(f.toLowerCase())) continue;
+    try {
+      fs.mkdirSync(path.join(ROMS_DIR, 'psx'), { recursive: true });
+      fs.renameSync(path.join(dir, f), path.join(ROMS_DIR, 'psx', f));
+      console.log(`roms: megadrive/${f} is a PS1 disc track (named by a cue sheet) — moved to psx/`);
+      moved = true;
+    } catch (e) {
+      console.error(`roms: could not move megadrive/${f}:`, e.message);
+    }
+  }
+  if (moved) onChange?.();
+}
+
 function cleanName(raw) {
   const name = path.basename(String(raw || '').trim());
   if (!name || name.startsWith('.') || name.includes('/') || name.includes('\\')) return null;
@@ -257,7 +310,7 @@ export function library() {
             return { file: f, size };
           });
       } catch {}
-      return { id: s.id, name: s.name, icon: s.icon, ext: s.ext, files };
+      return { id: s.id, name: s.name, icon: s.icon, ext: s.ext, ready: coreAvailable(s.id), files };
     }),
   };
 }
@@ -276,7 +329,8 @@ function routeIncoming(file, siblings) {
   const base = file.slice(0, -ext.length).replace(/\s*\(track \d+\)/i, '');
   if (ext === '.bin') {
     const hasCue = siblings.some(f => f.toLowerCase() === (base + '.cue').toLowerCase())
-      || fs.existsSync(path.join(ROMS_DIR, 'psx', base + '.cue'));
+      || fs.existsSync(path.join(ROMS_DIR, 'psx', base + '.cue'))
+      || psxCueWants(file);
     if (hasCue) return 'psx';
   }
   return routeFor(file);
@@ -373,6 +427,7 @@ function sortIncoming(onChange) {
       seen.delete(file);
       warned.delete(file);
       console.log(`roms: sorted ${INCOMING}/${file} → ${systemId}/`);
+      if (file.toLowerCase().endsWith('.cue')) rescueCueTracks(onChange);
       moved = true;
     } catch (e) {
       console.error(`roms: could not sort ${file}:`, e.message);
@@ -428,6 +483,7 @@ export function startIncomingSorter({ onChange }) {
   timer.unref?.();
   sortIncoming(onChange);
   rescueMisplacedZips(onChange).catch(() => {});
+  rescueCueTracks(onChange);
 }
 
 export function romsRouter({ onChange }) {
@@ -442,7 +498,11 @@ export function romsRouter({ onChange }) {
 
     const wanted = String(req.query.system || 'auto');
     const isBios = BIOS_NAMES.test(name);
-    const systemId = isBios ? 'bios' : wanted === 'auto' ? routeFor(name) : wanted;
+    // A .bin whose name appears in a cue sheet already in psx/ is a PS1 disc
+    // track, not a Genesis ROM (the page uploads cues first for this reason).
+    const autoRoute = name.toLowerCase().endsWith('.bin') && psxCueWants(name)
+      ? 'psx' : routeFor(name);
+    const systemId = isBios ? 'bios' : wanted === 'auto' ? autoRoute : wanted;
     const dir = isBios ? BIOS_DIR : systemId && systemDir(systemId);
     if (!dir) {
       return res.status(400).json({
@@ -527,6 +587,9 @@ export function romsRouter({ onChange }) {
         fs.renameSync(tmp, finalDest);
       } catch (e) { return abort(500, 'Could not save file: ' + e.message); }
       console.log(`roms: uploaded ${name} → ${finalSystem} (${written} bytes)`);
+      // A fresh cue sheet may name tracks that were misfiled as Genesis
+      // before it existed — reunite the disc.
+      if (name.toLowerCase().endsWith('.cue')) rescueCueTracks(onChange);
       onChange?.();
       res.json({ ok: true, system: finalSystem, file: name, size: written });
     });
