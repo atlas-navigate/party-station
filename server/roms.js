@@ -90,10 +90,26 @@ export function zipEntries(file) {
   }
 }
 
+// Systems a Pi 4 can't emulate: name them instead of letting their zips
+// masquerade as arcade sets that crash at launch.
+const ZIP_UNSUPPORTED = {
+  '.nds': 'Nintendo DS', '.3ds': 'Nintendo 3DS', '.cia': 'Nintendo 3DS',
+  '.wbfs': 'Wii', '.rvz': 'GameCube/Wii', '.gcm': 'GameCube', '.gcz': 'GameCube',
+  '.cso': 'PSP', '.wux': 'Wii U', '.xci': 'Switch', '.nsp': 'Switch',
+};
+
 function sniffEntries(entries) {
   for (const e of entries || []) {
     const sys = ZIP_INNER[path.extname(e.name).toLowerCase()];
     if (sys) return sys;
+  }
+  return null;
+}
+
+function sniffUnsupported(entries) {
+  for (const e of entries || []) {
+    const label = ZIP_UNSUPPORTED[path.extname(e.name).toLowerCase()];
+    if (label) return label;
   }
   return null;
 }
@@ -245,6 +261,14 @@ function sortIncoming(onChange) {
     // Console games inside zips get unpacked to their system, not moved.
     if (path.extname(file).toLowerCase() === '.zip' && !extracting.has(src)) {
       const entries = zipEntries(src);
+      const unsupported = sniffUnsupported(entries);
+      if (unsupported) {
+        if (!warned.has(file)) {
+          warned.add(file);
+          console.log(`roms: "${file}" is a ${unsupported} game — this console can't emulate that; leaving it in ${INCOMING}/`);
+        }
+        continue;
+      }
       const sniffed = sniffEntries(entries);
       if (sniffed) {
         extracting.add(src);
@@ -303,6 +327,22 @@ async function rescueMisplacedZips(onChange) {
   for (const file of files) {
     const src = path.join(dir, file);
     const entries = zipEntries(src);
+    // Zips of systems the Pi can't emulate get quarantined out of the
+    // launcher (kept on disk in roms/unsupported/) so they stop posing as
+    // playable arcade games.
+    const unsupported = sniffUnsupported(entries);
+    if (unsupported) {
+      try {
+        const quarantine = path.join(ROMS_DIR, 'unsupported');
+        fs.mkdirSync(quarantine, { recursive: true });
+        fs.renameSync(src, path.join(quarantine, file));
+        console.log(`roms: arcade/${file} is a ${unsupported} game (not emulatable here) — moved to roms/unsupported/`);
+        onChange?.();
+      } catch (e) {
+        console.error(`roms: could not quarantine arcade/${file}:`, e.message);
+      }
+      continue;
+    }
     const sniffed = sniffEntries(entries);
     if (!sniffed) continue;
     try {
@@ -380,6 +420,10 @@ export function romsRouter({ onChange }) {
       // arcade sets stay zipped.
       if (wanted === 'auto' && path.extname(name).toLowerCase() === '.zip') {
         const entries = zipEntries(tmp);
+        const unsupported = sniffUnsupported(entries);
+        if (unsupported) {
+          return abort(415, `That's a ${unsupported} game — this console can't emulate ${unsupported}.`);
+        }
         const sniffed = sniffEntries(entries);
         if (sniffed && systemDir(sniffed)) {
           try {

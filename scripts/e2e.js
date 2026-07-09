@@ -212,6 +212,13 @@ if (alice.sync.emu?.available) {
   }
   ok('zipped PS1 .chd unpacked with correct bytes (deflate)');
 
+  r = await (await fetch(`${base}/api/roms?name=${encodeURIComponent('Catan Test.zip')}&system=auto`,
+    { method: 'POST', body: zipOf('Catan Test.nds', Buffer.from('NDSDATA')) })).json();
+  if (!r.err || !r.err.includes('Nintendo DS')) {
+    throw new Error('DS zip should be rejected with a clear reason: ' + JSON.stringify(r));
+  }
+  ok('unsupported-console zip rejected with named reason (DS)');
+
   if (romsDir) {
     const { default: fs } = await import('fs');
     const { default: path } = await import('path');
