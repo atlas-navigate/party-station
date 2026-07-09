@@ -34,6 +34,54 @@ export function routeFor(filename) {
   return EXT_ROUTE[path.extname(filename).toLowerCase()] || null;
 }
 
+// A .zip defaults to "arcade", but console ROMs often travel zipped too —
+// and a console zip fed to MAME dies at launch. Peek at the zip's central
+// directory (cheap: two reads, no extraction) and route by what's inside.
+// Anything unrecognized (real MAME sets are .rom/.bin soup) stays arcade.
+const ZIP_INNER = {
+  '.nes': 'nes', '.sfc': 'snes', '.smc': 'snes',
+  '.md': 'megadrive', '.gen': 'megadrive',
+  '.gb': 'gb', '.gbc': 'gbc', '.gba': 'gba',
+  '.z64': 'n64', '.n64': 'n64', '.v64': 'n64',
+};
+
+export function sniffZipSystem(file) {
+  let fd;
+  try {
+    fd = fs.openSync(file, 'r');
+    const size = fs.fstatSync(fd).size;
+    // End-of-central-directory record sits in the last 65557 bytes.
+    const tailLen = Math.min(size, 65557);
+    const tail = Buffer.alloc(tailLen);
+    fs.readSync(fd, tail, 0, tailLen, size - tailLen);
+    let eocd = -1;
+    for (let i = tailLen - 22; i >= 0; i--) {
+      if (tail.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
+    }
+    if (eocd < 0) return null;
+    const cdSize = tail.readUInt32LE(eocd + 12);
+    const cdOff = tail.readUInt32LE(eocd + 16);
+    if (cdSize <= 0 || cdSize > 4 * 1024 * 1024 || cdOff + cdSize > size) return null;
+    const cd = Buffer.alloc(cdSize);
+    fs.readSync(fd, cd, 0, cdSize, cdOff);
+    let p = 0;
+    while (p + 46 <= cdSize && cd.readUInt32LE(p) === 0x02014b50) {
+      const nameLen = cd.readUInt16LE(p + 28);
+      const extraLen = cd.readUInt16LE(p + 30);
+      const commentLen = cd.readUInt16LE(p + 32);
+      const inner = cd.toString('utf8', p + 46, p + 46 + nameLen);
+      const sys = ZIP_INNER[path.extname(inner).toLowerCase()];
+      if (sys) return sys;
+      p += 46 + nameLen + extraLen + commentLen;
+    }
+    return null;
+  } catch {
+    return null;
+  } finally {
+    if (fd !== undefined) { try { fs.closeSync(fd); } catch {} }
+  }
+}
+
 function cleanName(raw) {
   const name = path.basename(String(raw || '').trim());
   if (!name || name.startsWith('.') || name.includes('/') || name.includes('\\')) return null;
@@ -72,14 +120,18 @@ const seen = new Map();   // filename -> {size, mtime} from the previous tick
 const warned = new Set(); // unroutable files we already logged about
 
 // A lone .bin usually means Genesis, but next to a same-named .cue it's a
-// PS1 disc image and must stay with its cue sheet.
-function routeIncoming(file, siblings) {
+// PS1 disc image and must stay with its cue sheet. Zips get sniffed.
+function routeIncoming(file, siblings, fullPath) {
   const ext = path.extname(file).toLowerCase();
   const base = file.slice(0, -ext.length).replace(/\s*\(track \d+\)/i, '');
   if (ext === '.bin') {
     const hasCue = siblings.some(f => f.toLowerCase() === (base + '.cue').toLowerCase())
       || fs.existsSync(path.join(ROMS_DIR, 'psx', base + '.cue'));
     if (hasCue) return 'psx';
+  }
+  if (ext === '.zip') {
+    const sniffed = sniffZipSystem(fullPath);
+    if (sniffed) return sniffed;
   }
   return routeFor(file);
 }
@@ -103,7 +155,7 @@ function sortIncoming(onChange) {
     seen.set(file, { size: st.size, mtime: st.mtimeMs });
     if (!prev || prev.size !== st.size || prev.mtime !== st.mtimeMs) continue;
 
-    const systemId = routeIncoming(file, files);
+    const systemId = routeIncoming(file, files, src);
     if (!systemId) {
       if (!warned.has(file)) {
         warned.add(file);
@@ -181,12 +233,25 @@ export function romsRouter({ onChange }) {
     out.on('error', e => abort(500, 'Could not write file: ' + e.message));
     out.on('finish', () => {
       if (failed) return;
+      // Auto-routed zips: now that the bytes are on disk, look inside —
+      // a zipped console ROM belongs with its console, not in arcade.
+      let finalSystem = systemId;
+      let finalDest = dest;
+      if (wanted === 'auto' && path.extname(name).toLowerCase() === '.zip') {
+        const sniffed = sniffZipSystem(tmp);
+        const sniffedDir = sniffed && sniffed !== systemId && systemDir(sniffed);
+        if (sniffedDir) {
+          finalSystem = sniffed;
+          finalDest = path.join(sniffedDir, name);
+        }
+      }
       try {
-        fs.renameSync(tmp, dest);
+        fs.mkdirSync(path.dirname(finalDest), { recursive: true });
+        fs.renameSync(tmp, finalDest);
       } catch (e) { return abort(500, 'Could not save file: ' + e.message); }
-      console.log(`roms: uploaded ${name} → ${systemId} (${written} bytes)`);
+      console.log(`roms: uploaded ${name} → ${finalSystem} (${written} bytes)`);
       onChange?.();
-      res.json({ ok: true, system: systemId, file: name, size: written });
+      res.json({ ok: true, system: finalSystem, file: name, size: written });
     });
     req.pipe(out);
   });

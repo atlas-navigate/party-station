@@ -24,6 +24,8 @@ export const SYSTEMS = [
   { id: 'nes', name: 'NES', icon: '🎮', cores: ['fceumm_libretro.so', 'nestopia_libretro.so'], ext: ['.nes', '.zip'] },
   { id: 'snes', name: 'SNES', icon: '🎮', cores: ['snes9x_libretro.so', 'snes9x2010_libretro.so'], ext: ['.sfc', '.smc', '.zip'] },
   { id: 'megadrive', name: 'Genesis', icon: '🎮', cores: ['genesis_plus_gx_libretro.so', 'picodrive_libretro.so'], ext: ['.md', '.gen', '.bin', '.zip'] },
+  { id: 'gb', name: 'Game Boy', icon: '🎮', cores: ['gambatte_libretro.so'], ext: ['.gb', '.zip'] },
+  { id: 'gbc', name: 'Game Boy Color', icon: '🎮', cores: ['gambatte_libretro.so'], ext: ['.gbc', '.zip'] },
   { id: 'psx', name: 'PlayStation', icon: '💿', cores: ['pcsx_rearmed_libretro.so', 'duckstation_libretro.so'], ext: ['.cue', '.chd', '.pbp', '.m3u'] },
   { id: 'n64', name: 'Nintendo 64', icon: '🎮', cores: ['mupen64plus_next_libretro.so', 'parallel_n64_libretro.so'], ext: ['.z64', '.n64', '.v64'] },
   { id: 'gba', name: 'Game Boy Advance', icon: '🎮', cores: ['mgba_libretro.so', 'gpsp_libretro.so'], ext: ['.gba'] },
@@ -133,16 +135,29 @@ export function launch(systemId, file, onExit) {
   }
   let stderrTail = '';
   proc.stderr.on('data', d => { stderrTail = (stderrTail + d).slice(-800); });
+  const startedAt = Date.now();
   current = { system: sys.name, icon: sys.icon, title: game.title, proc };
   console.log(`emulator: launched ${game.title} (${sys.id})`);
-  proc.on('exit', (code) => {
+  proc.on('exit', (code, signal) => {
+    const ms = Date.now() - startedAt;
+    lastExit = {
+      title: game.title, system: sys.id, file: game.file,
+      code, signal, ms,
+      stderr: stderrTail.split('\n').filter(Boolean).slice(-3),
+    };
     console.log(`emulator: exited (${code})`, code ? stderrTail.split('\n').slice(-3).join(' | ') : '');
     current = null;
-    onExit?.(code);
+    // A launch that dies within seconds (and wasn't killed on purpose)
+    // almost always means the ROM doesn't fit the core — tell the players.
+    const crashed = !signal && ((code && ms < 20000) || ms < 3000);
+    onExit?.(code, { crashed, title: game.title, system: sys.id });
   });
-  proc.on('error', () => { current = null; onExit?.(-1); });
+  proc.on('error', () => { current = null; onExit?.(-1, { crashed: true, title: game.title, system: sys.id }); });
   return {};
 }
+
+let lastExit = null; // most recent emulator exit, for /api/status debugging
+export function lastExitInfo() { return lastExit; }
 
 export function kill() {
   if (current?.proc) {

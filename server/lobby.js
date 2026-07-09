@@ -377,7 +377,14 @@ function onPlayerMsg(p, m) {
       resumeGame(p, m.gameId); break;
     case 'emuLaunch': {
       if (phase !== 'hub') { toast(p, 'Head back to the hub first.'); break; }
-      const res = emulator.launch(m.system, m.file, () => broadcast());
+      const res = emulator.launch(m.system, m.file, (_code, info) => {
+        if (info?.crashed) {
+          toast('all', info.system === 'arcade'
+            ? `⚠️ ${info.title} quit right away — arcade zips must match the MAME 2003-Plus (0.78) ROM set.`
+            : `⚠️ ${info.title} quit right away — that file may not match this system's emulator.`);
+        }
+        broadcast();
+      });
       if (res.err) toast(p, res.err);
       else toast('all', `🕹️ ${emulator.publicState()?.title} is starting on the big screen…`);
       broadcast(); break;

@@ -43,6 +43,7 @@ app.get('/api/status', (_req, res) => res.json({
   updating: updater.status.updating,
   lastCheck: updater.status.lastCheck ? new Date(updater.status.lastCheck).toISOString() : null,
   updateError: updater.status.error,
+  emulatorLastExit: emulator.lastExitInfo(),
 }));
 
 const server = http.createServer(app);

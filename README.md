@@ -120,6 +120,16 @@ Android phones resolve `.local` names in modern versions; if a device can't,
 use the Pi's IP address (shown in the app's Settings sheet and in
 `journalctl -u party-station`).
 
+## Sound
+
+The party games play synthesized console sounds from the TV — menu blips,
+a game-start chime, a ding when it's a human's turn, a game-over fanfare.
+No audio files involved, so it works fully offline. Retro games get their
+sound from RetroArch. If the TV is silent in both, the Pi's audio output
+is probably pointed at the wrong device: on the Pi desktop right-click
+the volume icon and pick the TV's HDMI output (or `sudo raspi-config` →
+System Options → Audio).
+
 ## Troubleshooting from a keyboard
 
 Plug any keyboard into the Pi:
@@ -148,8 +158,10 @@ whichever way is easiest:
 
 - **Browser (easiest):** open `http://party-station.local/roms` from any
   laptop or phone and drag files in. Each file is routed to the right
-  system folder by its extension (`.sfc` → SNES, `.zip` → arcade, `.chd` →
-  PS1, …), with an override dropdown for the ambiguous ones.
+  system folder by its extension (`.sfc` → SNES, `.chd` → PS1, …), with an
+  override dropdown for the ambiguous ones. Zips get their contents
+  inspected: a `.zip` holding a `.gb`/`.nes`/`.sfc`/… file goes to that
+  console, and only true arcade sets land in MAME.
 - **scp, one folder for everything:** copy files into
   `~/RetroPie/roms/incoming/` — the station watches it, waits for the
   transfer to finish, and sorts each file into place (it even keeps PS1
@@ -166,8 +178,14 @@ the Pi's HDMI output; Bluetooth controllers work in it natively (that's
 their home turf). Exit with **Select+Start** and Party Station takes the
 screen back — phones also get a force-quit button just in case.
 
-Fine print: arcade `.zip`s must match the MAME 2003-Plus (0.78) ROM set;
-PS1 games may need a BIOS file in `~/RetroPie/BIOS`. Arcade games boot to
+Installed systems: arcade (MAME), NES, SNES, Genesis, Game Boy, Game Boy
+Color, and PS1. Want more (N64, GBA)? Install extra cores via
+`~/RetroPie-Setup/retropie_setup.sh`.
+
+Fine print: arcade `.zip`s must match the MAME 2003-Plus (0.78) ROM set —
+a zip from a newer MAME romset quits immediately (the station toasts a
+warning to every screen when that happens). PS1 games may need a BIOS
+file in `~/RetroPie/BIOS`. Arcade games boot to
 an attract screen waiting for a quarter — tap **Select** to insert a coin,
 then **Start**. Controllers are recognized via the autoconfig pack the
 setup script installs; if a pad still reports "not configured", plug in a

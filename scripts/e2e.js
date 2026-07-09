@@ -169,6 +169,30 @@ if (alice.sync.emu?.available) {
   }
   ok('ROM upload routes by extension (override + rejects unknowns)');
 
+  // Zipped console ROMs get sniffed by their contents instead of dumped in
+  // arcade — build a real (stored, uncompressed) zip holding a .gb file.
+  const storedZip = (inner, data) => {
+    const nameBuf = Buffer.from(inner);
+    const lfh = Buffer.alloc(30);
+    lfh.writeUInt32LE(0x04034b50, 0); lfh.writeUInt16LE(20, 4);
+    lfh.writeUInt32LE(data.length, 18); lfh.writeUInt32LE(data.length, 22);
+    lfh.writeUInt16LE(nameBuf.length, 26);
+    const cdh = Buffer.alloc(46);
+    cdh.writeUInt32LE(0x02014b50, 0); cdh.writeUInt16LE(20, 6);
+    cdh.writeUInt32LE(data.length, 20); cdh.writeUInt32LE(data.length, 24);
+    cdh.writeUInt16LE(nameBuf.length, 28);
+    const eocd = Buffer.alloc(22);
+    eocd.writeUInt32LE(0x06054b50, 0);
+    eocd.writeUInt16LE(1, 8); eocd.writeUInt16LE(1, 10);
+    eocd.writeUInt32LE(46 + nameBuf.length, 12);
+    eocd.writeUInt32LE(30 + nameBuf.length + data.length, 16);
+    return Buffer.concat([lfh, nameBuf, data, cdh, nameBuf, eocd]);
+  };
+  r = await (await fetch(`${base}/api/roms?name=${encodeURIComponent('Monopoly Test.zip')}&system=auto`,
+    { method: 'POST', body: storedZip('Monopoly Test.gb', Buffer.from('GBDATA')) })).json();
+  if (r.system !== 'gb') throw new Error('zip sniffing failed: ' + JSON.stringify(r));
+  ok('zipped console ROM routed by contents (.gb inside → gb)');
+
   if (romsDir) {
     const { default: fs } = await import('fs');
     const { default: path } = await import('path');
@@ -186,7 +210,8 @@ if (alice.sync.emu?.available) {
   }
 
   for (const [sys, file] of [['snes', 'Super Test (USA).sfc'], ['arcade', 'coinop.zip'],
-                             ['snes', 'console game.zip'], ['nes', 'Dropped Game.nes']]) {
+                             ['snes', 'console game.zip'], ['nes', 'Dropped Game.nes'],
+                             ['gb', 'Monopoly Test.zip']]) {
     await fetch(`${base}/api/roms/${sys}/${encodeURIComponent(file)}`, { method: 'DELETE' });
   }
   const lib2 = await (await fetch(`${base}/api/roms`)).json();

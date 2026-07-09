@@ -3,6 +3,7 @@
 import { connect } from './net.js';
 import { h, mount, toast } from './ui.js';
 import { createPads } from './pads.js';
+import { sfx } from './sfx.js';
 
 const root = document.getElementById('tv');
 document.body.classList.add('tv');
@@ -32,8 +33,8 @@ const net = connect({
   role: 'tv',
   onSync: s => { sync = s; reloadOnNewVersion(s); render(); },
   onMsg: m => {
-    if (m.t === 'toast') toast(m.text);
-    if (m.t === 'nope') toast(m.text, true);
+    if (m.t === 'toast') { toast(m.text); sfx.toast(); }
+    if (m.t === 'nope') { toast(m.text, true); sfx.nope(); }
     if (m.t === 'input' && relaySim?.input) relaySim.input(m.seat, m.d);
   },
 });
@@ -110,36 +111,40 @@ function hubList() {
 function padHub(pad, btn) {
   // Landing chooser: pick between party games and the retro cabinet.
   if (tvMode === null) {
-    if (btn === 'left' || btn === 'up') chooseIdx = 0;
-    if (btn === 'right' || btn === 'down') chooseIdx = 1;
+    if (btn === 'left' || btn === 'up') { chooseIdx = 0; sfx.blip(); }
+    if (btn === 'right' || btn === 'down') { chooseIdx = 1; sfx.blip(); }
     if (btn === 'a' || btn === 'start' || btn === 'x') {
       tvMode = chooseIdx === 1 ? 'retro' : 'party';
       hubCursor = 0;
+      sfx.select();
     }
     render();
     return;
   }
-  if (btn === 'b') { tvMode = null; render(); return; }
+  if (btn === 'b') { tvMode = null; sfx.back(); render(); return; }
   const list = hubList();
   const cols = 5;
   if (btn === 'left') hubCursor = Math.max(0, hubCursor - 1);
   if (btn === 'right') hubCursor = Math.min(list.length - 1, hubCursor + 1);
   if (btn === 'up') hubCursor = Math.max(0, hubCursor - cols);
   if (btn === 'down') hubCursor = Math.min(list.length - 1, hubCursor + cols);
+  if (['left', 'right', 'up', 'down'].includes(btn)) sfx.blip();
   const ent = list[hubCursor];
   if ((btn === 'a' || btn === 'start') && ent) {
+    sfx.select();
     if (ent.kind === 'game') padMsg(pad, { t: 'openLobby', gameId: ent.g.id });
     else padMsg(pad, { t: 'emuLaunch', system: ent.system, file: ent.file });
   }
   if (btn === 'x' && ent?.kind === 'game' && sync.saves[ent.g.id]) {
+    sfx.select();
     padMsg(pad, { t: 'resumeGame', gameId: ent.g.id });
   }
   render();
 }
 
 function padLobby(pad, btn, info) {
-  if (btn === 'a' && !info.joined) padMsg(pad, { t: 'joinLobby' });
-  if (btn === 'b' && info.joined) padMsg(pad, { t: 'leaveLobby' });
+  if (btn === 'a' && !info.joined) { padMsg(pad, { t: 'joinLobby' }); sfx.select(); }
+  if (btn === 'b' && info.joined) { padMsg(pad, { t: 'leaveLobby' }); sfx.back(); }
   if ((btn === 'start' || btn === 'x') && info.isHost) padMsg(pad, { t: 'start' });
   if (btn === 'x' && info.joined && !info.isHost) padMsg(pad, { t: 'start' }); // ignored server-side unless host
 }
@@ -188,12 +193,13 @@ function padGame(pad, btn, info, isRepeat) {
 
 function menuNav(pad, menu, btn, isRepeat) {
   const items = menu.spec.items.filter(i => !i.hidden);
-  if (btn === 'up') menu.idx = (menu.idx + items.length - 1) % items.length;
-  if (btn === 'down') menu.idx = (menu.idx + 1) % items.length;
-  if (btn === 'b' && !isRepeat) menus.delete(pad);
+  if (btn === 'up') { menu.idx = (menu.idx + items.length - 1) % items.length; sfx.blip(); }
+  if (btn === 'down') { menu.idx = (menu.idx + 1) % items.length; sfx.blip(); }
+  if (btn === 'b' && !isRepeat) { menus.delete(pad); sfx.back(); }
   if (btn === 'a' && !isRepeat) {
     const item = items[menu.idx];
     if (!item || item.disabled) return;
+    sfx.select();
     if (item.close) { menus.delete(pad); }
     else if (item.raw) { padMsg(pad, item.raw); menus.delete(pad); }
     else if (item.pick !== undefined) {
@@ -542,8 +548,29 @@ function emulatorScreen() {
   );
 }
 
+// State-driven sounds: chime on game start, fanfare on game over, and a
+// ding whenever a human seat's turn comes up in a turn-based game.
+let prevPhase = null;
+let prevAwaited = new Set();
+function soundTransitions() {
+  if (sync.phase !== prevPhase) {
+    if (sync.phase === 'game') sfx.start();
+    if (sync.phase === 'gameover') sfx.over();
+    prevPhase = sync.phase;
+    prevAwaited = new Set();
+  }
+  if (sync.phase === 'game' && sync.game?.mode === 'server') {
+    const awaited = new Set(sync.game.awaiting || []);
+    for (const seat of awaited) {
+      if (!prevAwaited.has(seat) && !sync.game.seats[seat]?.bot) { sfx.turn(); break; }
+    }
+    prevAwaited = awaited;
+  }
+}
+
 function render() {
   if (!sync) return;
+  soundTransitions();
   if (sync.emulator) { menus.clear(); mount(root, emulatorScreen()); return; }
   // A session started from a phone answers the landing prompt implicitly.
   if (tvMode === null && sync.phase !== 'hub') tvMode = 'party';
