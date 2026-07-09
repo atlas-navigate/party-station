@@ -53,7 +53,9 @@
     function enqueue(files) {
       for (const f of files) {
         const system = guessSystem(f.name);
-        queue.push({ file: f, system, pct: 0, status: system ? 'wait' : 'err', err: system ? null : 'Unknown file type' });
+        // The guess is only for display — uploads say system=auto so the
+        // server can look inside zips; explicit is set by the dropdown.
+        queue.push({ file: f, system, explicit: false, pct: 0, status: system ? 'wait' : 'err', err: system ? null : 'Unknown file type' });
       }
       render();
       pump();
@@ -67,13 +69,18 @@
       uploading = true;
       item.status = 'up';
       const xhr = new XMLHttpRequest();
-      xhr.open('POST', `/api/roms?name=${encodeURIComponent(item.file.name)}&system=${encodeURIComponent(item.system)}`);
+      xhr.open('POST', `/api/roms?name=${encodeURIComponent(item.file.name)}&system=${encodeURIComponent(item.explicit ? item.system : 'auto')}`);
       xhr.upload.onprogress = e => {
         if (e.lengthComputable) { item.pct = Math.round(e.loaded / e.total * 100); render(); }
       };
       xhr.onload = () => {
         uploading = false;
-        if (xhr.status === 200) { item.status = 'done'; item.pct = 100; }
+        if (xhr.status === 200) {
+          item.status = 'done'; item.pct = 100;
+          // Show where the server actually put it (zips may be unpacked
+          // into a different system than the extension suggested).
+          try { item.system = JSON.parse(xhr.responseText).system || item.system; } catch {}
+        }
         else {
           item.status = 'err';
           try { item.err = JSON.parse(xhr.responseText).err; } catch { item.err = 'Upload failed'; }
@@ -88,6 +95,7 @@
 
     function retry(item, system) {
       item.system = system;
+      item.explicit = true;
       item.status = 'wait';
       item.err = null;
       item.pct = 0;

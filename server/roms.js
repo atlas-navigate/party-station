@@ -26,6 +26,13 @@ const EXT_ROUTE = {
 
 const MAX_BYTES = 4 * 1024 ** 3;
 
+// BIOS dumps go to RetroPie/BIOS (RetroArch's system dir), not a ROM
+// folder — recognized by their canonical file names, however they arrive.
+const BIOS_DIR = path.join(ROMS_DIR, '..', 'BIOS');
+const BIOS_NAMES = /^(scph[\w-]+\.bin|psxonpsp660\.bin|ps1_rom\.bin)$/i;
+
+const destDirFor = sysId => (sysId === 'bios' ? BIOS_DIR : path.join(ROMS_DIR, sysId));
+
 // One folder to scp into: anything dropped in ROMS_DIR/incoming is sorted
 // into the right system folder once the file stops growing.
 export const INCOMING = 'incoming';
@@ -100,6 +107,7 @@ const ZIP_UNSUPPORTED = {
 
 function sniffEntries(entries) {
   for (const e of entries || []) {
+    if (BIOS_NAMES.test(path.basename(e.name))) return 'bios';
     const sys = ZIP_INNER[path.extname(e.name).toLowerCase()];
     if (sys) return sys;
   }
@@ -177,9 +185,10 @@ export async function extractConsoleZip(src, entries) {
     const base = path.basename(e.name);
     if (!base || base.startsWith('.')) continue;
     const ext = path.extname(base).toLowerCase();
-    const sysId = ZIP_INNER[ext] || (hasCue && DISC_SET_EXT.has(ext) ? 'psx' : null);
-    if (!sysId || !systemDir(sysId)) continue;
-    const dir = path.join(ROMS_DIR, sysId);
+    const sysId = BIOS_NAMES.test(base) ? 'bios'
+      : ZIP_INNER[ext] || (hasCue && DISC_SET_EXT.has(ext) ? 'psx' : null);
+    if (!sysId || (sysId !== 'bios' && !systemDir(sysId))) continue;
+    const dir = destDirFor(sysId);
     fs.mkdirSync(dir, { recursive: true });
     await extractEntry(src, e, path.join(dir, base));
     extracted.push({ file: base, system: sysId });
@@ -258,6 +267,20 @@ function sortIncoming(onChange) {
     seen.set(file, { size: st.size, mtime: st.mtimeMs });
     if (!prev || prev.size !== st.size || prev.mtime !== st.mtimeMs) continue;
 
+    // BIOS dumps head to RetroPie/BIOS by name, whatever way they arrive.
+    if (BIOS_NAMES.test(file)) {
+      try {
+        fs.mkdirSync(BIOS_DIR, { recursive: true });
+        fs.renameSync(src, path.join(BIOS_DIR, file));
+        seen.delete(file);
+        console.log(`roms: sorted ${INCOMING}/${file} → BIOS/`);
+        moved = true;
+      } catch (e) {
+        console.error(`roms: could not sort ${file}:`, e.message);
+      }
+      continue;
+    }
+
     // Console games inside zips get unpacked to their system, not moved.
     if (path.extname(file).toLowerCase() === '.zip' && !extracting.has(src)) {
       const entries = zipEntries(src);
@@ -283,8 +306,8 @@ function sortIncoming(onChange) {
           .catch(e => {
             console.error(`roms: could not unpack ${file}:`, e.message);
             try { // park the zip with its sniffed system rather than lose it
-              fs.mkdirSync(path.join(ROMS_DIR, sniffed), { recursive: true });
-              fs.renameSync(src, path.join(ROMS_DIR, sniffed, file));
+              fs.mkdirSync(destDirFor(sniffed), { recursive: true });
+              fs.renameSync(src, path.join(destDirFor(sniffed), file));
               onChange?.();
             } catch {}
           })
@@ -376,8 +399,9 @@ export function romsRouter({ onChange }) {
     if (!name) return res.status(400).json({ err: 'Bad or missing file name' });
 
     const wanted = String(req.query.system || 'auto');
-    const systemId = wanted === 'auto' ? routeFor(name) : wanted;
-    const dir = systemId && systemDir(systemId);
+    const isBios = BIOS_NAMES.test(name);
+    const systemId = isBios ? 'bios' : wanted === 'auto' ? routeFor(name) : wanted;
+    const dir = isBios ? BIOS_DIR : systemId && systemDir(systemId);
     if (!dir) {
       return res.status(400).json({
         err: wanted === 'auto'
@@ -418,14 +442,14 @@ export function romsRouter({ onChange }) {
       // Auto-routed zips: now that the bytes are on disk, look inside — a
       // zipped console game gets unpacked into its system; only true
       // arcade sets stay zipped.
-      if (wanted === 'auto' && path.extname(name).toLowerCase() === '.zip') {
+      if (wanted === 'auto' && !isBios && path.extname(name).toLowerCase() === '.zip') {
         const entries = zipEntries(tmp);
         const unsupported = sniffUnsupported(entries);
         if (unsupported) {
           return abort(415, `That's a ${unsupported} game — this console can't emulate ${unsupported}.`);
         }
         const sniffed = sniffEntries(entries);
-        if (sniffed && systemDir(sniffed)) {
+        if (sniffed && (sniffed === 'bios' || systemDir(sniffed))) {
           try {
             const done = await extractConsoleZip(tmp, entries);
             if (done.length) {
@@ -439,7 +463,7 @@ export function romsRouter({ onChange }) {
           }
           // Couldn't unpack — at least park the zip with the right system.
           finalSystem = sniffed;
-          finalDest = path.join(systemDir(sniffed), name);
+          finalDest = path.join(destDirFor(sniffed), name);
         }
       }
       try {

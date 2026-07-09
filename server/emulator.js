@@ -126,13 +126,14 @@ export function launch(systemId, file, onExit) {
     XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR || `/run/user/${uid}`,
   };
   // Party-console defaults RetroArch doesn't ship with: the left analog
-  // stick doubles as the d-pad, so guests pushing the stick aren't left
-  // wondering why only the d-pad moves their player.
+  // stick doubles as the d-pad (guests push sticks), and BIOS files are
+  // looked up in RetroPie/BIOS no matter which retroarch.cfg is in play.
   const extraCfg = path.join(os.tmpdir(), 'party-station-retroarch-append.cfg');
   const args = ['-L', sys.core, romPath, '--fullscreen'];
   try {
     fs.writeFileSync(extraCfg,
-      [1, 2, 3, 4].map(n => `input_player${n}_analog_dpad_mode = "1"`).join('\n') + '\n');
+      [1, 2, 3, 4].map(n => `input_player${n}_analog_dpad_mode = "1"`).join('\n')
+      + `\nsystem_directory = "${path.join(ROMS_DIR, '..', 'BIOS')}"\n`);
     args.push('--appendconfig', extraCfg);
   } catch {}
   let proc;

@@ -219,6 +219,25 @@ if (alice.sync.emu?.available) {
   }
   ok('unsupported-console zip rejected with named reason (DS)');
 
+  // BIOS dumps route to RetroPie/BIOS by canonical name — bare or zipped.
+  r = await (await upload('scph1001.bin')).json();
+  if (r.system !== 'bios') throw new Error('BIOS file not routed to BIOS: ' + JSON.stringify(r));
+  r = await (await fetch(`${base}/api/roms?name=${encodeURIComponent('ps1bios.zip')}&system=auto`,
+    { method: 'POST', body: zipOf('scph5501.bin', Buffer.from('BIOSDATA')) })).json();
+  if (r.system !== 'bios' || r.file !== 'scph5501.bin') {
+    throw new Error('zipped BIOS not unpacked to BIOS: ' + JSON.stringify(r));
+  }
+  if (romsDir) {
+    const { default: fsB } = await import('fs');
+    const { default: pathB } = await import('path');
+    for (const f of ['scph1001.bin', 'scph5501.bin']) {
+      if (!fsB.existsSync(pathB.join(romsDir, '..', 'BIOS', f))) {
+        throw new Error(`BIOS/${f} missing on disk`);
+      }
+    }
+  }
+  ok('PS1 BIOS files land in RetroPie/BIOS (bare + zipped)');
+
   if (romsDir) {
     const { default: fs } = await import('fs');
     const { default: path } = await import('path');
