@@ -125,9 +125,19 @@ export function launch(systemId, file, onExit) {
     WAYLAND_DISPLAY: process.env.WAYLAND_DISPLAY || 'wayland-0',
     XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR || `/run/user/${uid}`,
   };
+  // Party-console defaults RetroArch doesn't ship with: the left analog
+  // stick doubles as the d-pad, so guests pushing the stick aren't left
+  // wondering why only the d-pad moves their player.
+  const extraCfg = path.join(os.tmpdir(), 'party-station-retroarch-append.cfg');
+  const args = ['-L', sys.core, romPath, '--fullscreen'];
+  try {
+    fs.writeFileSync(extraCfg,
+      [1, 2, 3, 4].map(n => `input_player${n}_analog_dpad_mode = "1"`).join('\n') + '\n');
+    args.push('--appendconfig', extraCfg);
+  } catch {}
   let proc;
   try {
-    proc = spawn(findRetroarch(), ['-L', sys.core, romPath, '--fullscreen'], {
+    proc = spawn(findRetroarch(), args, {
       env, stdio: ['ignore', 'ignore', 'pipe'], detached: false,
     });
   } catch (e) {
