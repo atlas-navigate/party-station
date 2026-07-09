@@ -225,6 +225,29 @@ EOF
         echo "    ⚠ $pkg failed (see /tmp/retropie-$pkg.log) — install later via $RP_SETUP/retropie_setup.sh"
       fi
     done
+    # Controller profiles: RetroPie normally maps pads via EmulationStation's
+    # config wizard, which Party Station doesn't use — so without these,
+    # RetroArch greets controllers with "not configured" and games ignore
+    # them. Install the community autoconfig pack (8BitDo, Xbox, PlayStation,
+    # …) into both places RetroArch might look, never overwriting profiles
+    # the user saved themselves.
+    echo "    Installing controller autoconfig profiles…"
+    JOY_TMP="$(mktemp -d)"
+    if env GIT_TERMINAL_PROMPT=0 git clone --depth=1 \
+         https://github.com/libretro/retroarch-joypad-autoconfig "$JOY_TMP" >/dev/null 2>&1; then
+      mkdir -p /opt/retropie/configs/all/retroarch-joypads
+      cp -n "$JOY_TMP"/udev/*.cfg /opt/retropie/configs/all/retroarch-joypads/ 2>/dev/null || true
+      chown -R "$RUN_USER":"$RUN_USER" /opt/retropie/configs/all/retroarch-joypads
+      sudo -u "$RUN_USER" mkdir -p "$HOME_DIR/.config/retroarch/autoconfig/udev"
+      cp -n "$JOY_TMP"/udev/*.cfg "$HOME_DIR/.config/retroarch/autoconfig/udev/" 2>/dev/null || true
+      chown -R "$RUN_USER":"$RUN_USER" "$HOME_DIR/.config/retroarch/autoconfig"
+      echo "    $(ls "$JOY_TMP"/udev/*.cfg | wc -l) pad profiles installed."
+    else
+      echo "    ⚠ Could not fetch pad profiles (offline?) — map pads once in the"
+      echo "      RetroArch menu instead: F1 → Settings → Input → Port 1 Controls."
+    fi
+    rm -rf "$JOY_TMP"
+
     sudo -u "$RUN_USER" mkdir -p \
       "$HOME_DIR/RetroPie/roms/arcade" "$HOME_DIR/RetroPie/roms/nes" \
       "$HOME_DIR/RetroPie/roms/snes" "$HOME_DIR/RetroPie/roms/megadrive" \

@@ -536,7 +536,9 @@ function emulatorScreen() {
         h('div', { class: 'tv-big', style: 'font-size:54px' }, e.title),
         h('p', { class: 'dim', style: 'font-size:22px;margin-top:12px' },
           `${e.system} — the emulator is taking over this screen…`),
-        h('p', { class: 'dim', style: 'font-size:18px' }, 'Exit with Select+Start to come back to Party Station.'))),
+        e.system?.startsWith('Arcade') && h('p', { class: 'dim', style: 'font-size:18px' },
+          '🪙 Arcade rules: tap Select to insert a coin, then press Start to play.'),
+        h('p', { class: 'dim', style: 'font-size:18px' }, 'Exit by holding Select and pressing Start.'))),
   );
 }
 

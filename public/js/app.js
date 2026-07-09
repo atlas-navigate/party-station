@@ -189,7 +189,9 @@ function emulatorScreen() {
     h('div', { style: 'font-size:64px' }, e.icon || '🕹️'),
     h('h1', {}, e.title),
     h('p', { class: 'dim' }, `Running in the ${e.system} emulator on the big screen.`),
-    h('p', { class: 'dim', style: 'font-size:13px' }, 'Exit in the emulator (Select+Start) to return to Party Station.'),
+    e.system?.startsWith('Arcade') && h('p', { class: 'dim', style: 'font-size:13px' },
+      '🪙 Arcade rules: tap Select on the controller to insert a coin, then press Start.'),
+    h('p', { class: 'dim', style: 'font-size:13px' }, 'Exit in the emulator (hold Select, press Start) to return to Party Station.'),
     h('div', { class: 'actionbar' },
       h('button', {
         class: 'tok danger', onclick: () => {

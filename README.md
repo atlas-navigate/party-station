@@ -167,7 +167,13 @@ their home turf). Exit with **Select+Start** and Party Station takes the
 screen back — phones also get a force-quit button just in case.
 
 Fine print: arcade `.zip`s must match the MAME 2003-Plus (0.78) ROM set;
-PS1 games may need a BIOS file in `~/RetroPie/BIOS`. Per-title honesty for
+PS1 games may need a BIOS file in `~/RetroPie/BIOS`. Arcade games boot to
+an attract screen waiting for a quarter — tap **Select** to insert a coin,
+then **Start**. Controllers are recognized via the autoconfig pack the
+setup script installs; if a pad still reports "not configured", plug in a
+keyboard, press **F1** for the RetroArch menu → Settings → Input →
+RetroPad Binds → Port 1 Controls → Set All Controls, then Save Controller
+Profile — it's remembered from then on. Per-title honesty for
 a Pi 4: NBA Jam and MK2 run full speed under `lr-mame2003-plus`; NFL
 Blitz's 3dfx arcade board is NOT playable under MAME on a Pi — use the PS1
 port with `lr-pcsx-rearmed` instead. Want more systems (N64, GBA)? Install
