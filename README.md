@@ -179,8 +179,8 @@ their home turf). Exit with **Select+Start** and Party Station takes the
 screen back — phones also get a force-quit button just in case.
 
 Installed systems: arcade (MAME), NES, SNES, Genesis, Game Boy, Game Boy
-Color, and PS1. Want more (N64, GBA)? Install extra cores via
-`~/RetroPie-Setup/retropie_setup.sh`.
+Color, Game Boy Advance, and PS1. Want more (N64, …)? Install extra cores
+via `~/RetroPie-Setup/retropie_setup.sh`.
 
 Fine print: arcade `.zip`s must match the MAME 2003-Plus (0.78) ROM set —
 a zip from a newer MAME romset quits immediately (the station toasts a

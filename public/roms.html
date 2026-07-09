@@ -134,7 +134,9 @@
             h('h1', {}, '🕹️ ROM Library')),
           h('a', { class: 'tok small', href: '/' }, '← Games')),
         h('p', { class: 'dim', style: 'font-size:14px;margin-bottom:14px' },
-          'Drop in dumps of games you own — each file lands in the right RetroPie folder automatically and shows up in the Cabinet within a moment.'),
+          'Drop in dumps of games you own — each file lands in the right RetroPie folder automatically and shows up in the Cabinet within a moment. ',
+          'Zipped console games are unpacked for you; drop the whole zip. ',
+          '(Dragging a file straight out of an archive window doesn’t work in browsers — drop the zip itself instead.)'),
         h('div', {
           class: 'drop', onclick: () => input.click(),
           ondragover: e => { e.preventDefault(); e.currentTarget.classList.add('over'); },

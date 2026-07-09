@@ -52,7 +52,7 @@ for (const c of [alice, bob]) {
       && s.game.awaiting?.includes(s.game.yourSeat)) {
       setTimeout(() => {
         if (c.sync.phase === 'game') c.send({ t: 'act', a: { t: 'draw' } });
-      }, 120);
+      }, 250); // slow enough that even a lucky short game outlives the 500ms save test
     }
   });
 }
@@ -169,17 +169,19 @@ if (alice.sync.emu?.available) {
   }
   ok('ROM upload routes by extension (override + rejects unknowns)');
 
-  // Zipped console ROMs get sniffed by their contents instead of dumped in
-  // arcade — build a real (stored, uncompressed) zip holding a .gb file.
-  const storedZip = (inner, data) => {
+  // Zipped console games get sniffed by their contents and UNPACKED into
+  // the right system, instead of being dumped whole into arcade.
+  const zipOf = (inner, data, method = 0, rawLen = data.length) => {
     const nameBuf = Buffer.from(inner);
     const lfh = Buffer.alloc(30);
     lfh.writeUInt32LE(0x04034b50, 0); lfh.writeUInt16LE(20, 4);
-    lfh.writeUInt32LE(data.length, 18); lfh.writeUInt32LE(data.length, 22);
+    lfh.writeUInt16LE(method, 8);
+    lfh.writeUInt32LE(data.length, 18); lfh.writeUInt32LE(rawLen, 22);
     lfh.writeUInt16LE(nameBuf.length, 26);
     const cdh = Buffer.alloc(46);
     cdh.writeUInt32LE(0x02014b50, 0); cdh.writeUInt16LE(20, 6);
-    cdh.writeUInt32LE(data.length, 20); cdh.writeUInt32LE(data.length, 24);
+    cdh.writeUInt16LE(method, 10);
+    cdh.writeUInt32LE(data.length, 20); cdh.writeUInt32LE(rawLen, 24);
     cdh.writeUInt16LE(nameBuf.length, 28);
     const eocd = Buffer.alloc(22);
     eocd.writeUInt32LE(0x06054b50, 0);
@@ -189,9 +191,26 @@ if (alice.sync.emu?.available) {
     return Buffer.concat([lfh, nameBuf, data, cdh, nameBuf, eocd]);
   };
   r = await (await fetch(`${base}/api/roms?name=${encodeURIComponent('Monopoly Test.zip')}&system=auto`,
-    { method: 'POST', body: storedZip('Monopoly Test.gb', Buffer.from('GBDATA')) })).json();
-  if (r.system !== 'gb') throw new Error('zip sniffing failed: ' + JSON.stringify(r));
-  ok('zipped console ROM routed by contents (.gb inside → gb)');
+    { method: 'POST', body: zipOf('Monopoly Test.gb', Buffer.from('GBDATA')) })).json();
+  if (r.system !== 'gb' || r.file !== 'Monopoly Test.gb') {
+    throw new Error('stored zip was not unpacked to gb: ' + JSON.stringify(r));
+  }
+  ok('zipped console ROM unpacked by contents (.gb inside → gb/)');
+
+  const { deflateRawSync } = await import('zlib');
+  const chdRaw = Buffer.from('FAKE-CHD-DISC-IMAGE-BYTES-0123456789');
+  r = await (await fetch(`${base}/api/roms?name=${encodeURIComponent('Blitz Test.zip')}&system=auto`,
+    { method: 'POST', body: zipOf('Blitz Test.chd', deflateRawSync(chdRaw), 8, chdRaw.length) })).json();
+  if (r.system !== 'psx' || r.file !== 'Blitz Test.chd') {
+    throw new Error('deflated chd zip was not unpacked to psx: ' + JSON.stringify(r));
+  }
+  const { default: fsChk } = await import('fs');
+  const { default: pathChk } = await import('path');
+  if (process.env.ROMS_DIR) {
+    const extractedBytes = fsChk.readFileSync(pathChk.join(process.env.ROMS_DIR, 'psx', 'Blitz Test.chd'));
+    if (!extractedBytes.equals(chdRaw)) throw new Error('deflated chd bytes corrupted on extraction');
+  }
+  ok('zipped PS1 .chd unpacked with correct bytes (deflate)');
 
   if (romsDir) {
     const { default: fs } = await import('fs');
@@ -211,7 +230,7 @@ if (alice.sync.emu?.available) {
 
   for (const [sys, file] of [['snes', 'Super Test (USA).sfc'], ['arcade', 'coinop.zip'],
                              ['snes', 'console game.zip'], ['nes', 'Dropped Game.nes'],
-                             ['gb', 'Monopoly Test.zip']]) {
+                             ['gb', 'Monopoly Test.gb'], ['psx', 'Blitz Test.chd']]) {
     await fetch(`${base}/api/roms/${sys}/${encodeURIComponent(file)}`, { method: 'DELETE' });
   }
   const lib2 = await (await fetch(`${base}/api/roms`)).json();

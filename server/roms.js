@@ -5,6 +5,7 @@
 import express from 'express';
 import fs from 'fs';
 import path from 'path';
+import zlib from 'zlib';
 import { ROMS_DIR, SYSTEMS } from './emulator.js';
 
 // One upload target per distinct ROM folder ('mame-libretro'/'fba' are
@@ -34,18 +35,20 @@ export function routeFor(filename) {
   return EXT_ROUTE[path.extname(filename).toLowerCase()] || null;
 }
 
-// A .zip defaults to "arcade", but console ROMs often travel zipped too —
+// A .zip defaults to "arcade", but console games often travel zipped too —
 // and a console zip fed to MAME dies at launch. Peek at the zip's central
-// directory (cheap: two reads, no extraction) and route by what's inside.
-// Anything unrecognized (real MAME sets are .rom/.bin soup) stays arcade.
+// directory (cheap: two reads) and, when it holds console ROMs or PS1 disc
+// images, EXTRACT them into the right system folder instead of parking the
+// zip. Real MAME sets (.rom/.bin soup inside) are left untouched.
 const ZIP_INNER = {
   '.nes': 'nes', '.sfc': 'snes', '.smc': 'snes',
   '.md': 'megadrive', '.gen': 'megadrive',
   '.gb': 'gb', '.gbc': 'gbc', '.gba': 'gba',
   '.z64': 'n64', '.n64': 'n64', '.v64': 'n64',
+  '.chd': 'psx', '.pbp': 'psx', '.cue': 'psx',
 };
 
-export function sniffZipSystem(file) {
+export function zipEntries(file) {
   let fd;
   try {
     fd = fs.openSync(file, 'r');
@@ -64,22 +67,108 @@ export function sniffZipSystem(file) {
     if (cdSize <= 0 || cdSize > 4 * 1024 * 1024 || cdOff + cdSize > size) return null;
     const cd = Buffer.alloc(cdSize);
     fs.readSync(fd, cd, 0, cdSize, cdOff);
+    const entries = [];
     let p = 0;
     while (p + 46 <= cdSize && cd.readUInt32LE(p) === 0x02014b50) {
       const nameLen = cd.readUInt16LE(p + 28);
       const extraLen = cd.readUInt16LE(p + 30);
       const commentLen = cd.readUInt16LE(p + 32);
-      const inner = cd.toString('utf8', p + 46, p + 46 + nameLen);
-      const sys = ZIP_INNER[path.extname(inner).toLowerCase()];
-      if (sys) return sys;
+      entries.push({
+        name: cd.toString('utf8', p + 46, p + 46 + nameLen),
+        method: cd.readUInt16LE(p + 10),
+        csize: cd.readUInt32LE(p + 20),
+        usize: cd.readUInt32LE(p + 24),
+        localOff: cd.readUInt32LE(p + 42),
+      });
       p += 46 + nameLen + extraLen + commentLen;
     }
-    return null;
+    return entries;
   } catch {
     return null;
   } finally {
     if (fd !== undefined) { try { fs.closeSync(fd); } catch {} }
   }
+}
+
+function sniffEntries(entries) {
+  for (const e of entries || []) {
+    const sys = ZIP_INNER[path.extname(e.name).toLowerCase()];
+    if (sys) return sys;
+  }
+  return null;
+}
+
+export function sniffZipSystem(file) {
+  return sniffEntries(zipEntries(file));
+}
+
+// Stream one zip entry to disk — never buffers whole files (a PS1 .chd can
+// be hundreds of MB and the Pi has 2GB). Stored and deflate entries only;
+// zip64 (>4GB members) is rejected and handled by the caller's fallback.
+function extractEntry(src, entry, dest) {
+  return new Promise((resolve, reject) => {
+    if (entry.method !== 0 && entry.method !== 8) return reject(new Error('unsupported compression'));
+    if (!entry.csize || entry.csize === 0xFFFFFFFF || entry.localOff === 0xFFFFFFFF) {
+      return reject(new Error('unsupported zip layout'));
+    }
+    let dataStart;
+    try {
+      const fd = fs.openSync(src, 'r');
+      const hdr = Buffer.alloc(30);
+      fs.readSync(fd, hdr, 0, 30, entry.localOff);
+      fs.closeSync(fd);
+      if (hdr.readUInt32LE(0) !== 0x04034b50) return reject(new Error('bad zip entry'));
+      dataStart = entry.localOff + 30 + hdr.readUInt16LE(26) + hdr.readUInt16LE(28);
+    } catch (e) { return reject(e); }
+    const inp = fs.createReadStream(src, { start: dataStart, end: dataStart + entry.csize - 1 });
+    const out = fs.createWriteStream(dest + '.part');
+    let settled = false;
+    const fin = err => {
+      if (settled) return;
+      settled = true;
+      if (err) {
+        out.destroy();
+        fs.promises.unlink(dest + '.part').catch(() => {});
+        reject(err);
+      } else {
+        try { fs.renameSync(dest + '.part', dest); resolve(); }
+        catch (e) { reject(e); }
+      }
+    };
+    out.on('finish', () => fin());
+    inp.on('error', fin);
+    out.on('error', fin);
+    if (entry.method === 8) {
+      const inflate = zlib.createInflateRaw();
+      inflate.on('error', fin);
+      inp.pipe(inflate).pipe(out);
+    } else {
+      inp.pipe(out);
+    }
+  });
+}
+
+// Pull every recognized console/disc file out of a zip into its system
+// folder. A .cue means a PS1 disc set — take all its files (.bin tracks
+// included). Returns [{file, system}] of what landed.
+const DISC_SET_EXT = new Set(['.cue', '.bin', '.img', '.sub', '.ccd', '.chd', '.pbp']);
+
+export async function extractConsoleZip(src, entries) {
+  const hasCue = entries.some(e => e.name.toLowerCase().endsWith('.cue'));
+  const extracted = [];
+  for (const e of entries) {
+    if (!e.csize || e.name.endsWith('/')) continue;
+    const base = path.basename(e.name);
+    if (!base || base.startsWith('.')) continue;
+    const ext = path.extname(base).toLowerCase();
+    const sysId = ZIP_INNER[ext] || (hasCue && DISC_SET_EXT.has(ext) ? 'psx' : null);
+    if (!sysId || !systemDir(sysId)) continue;
+    const dir = path.join(ROMS_DIR, sysId);
+    fs.mkdirSync(dir, { recursive: true });
+    await extractEntry(src, e, path.join(dir, base));
+    extracted.push({ file: base, system: sysId });
+  }
+  return extracted;
 }
 
 function cleanName(raw) {
@@ -116,22 +205,20 @@ export function library() {
 
 // ---------------------------------------------------------- incoming sorter
 
-const seen = new Map();   // filename -> {size, mtime} from the previous tick
-const warned = new Set(); // unroutable files we already logged about
+const seen = new Map();      // filename -> {size, mtime} from the previous tick
+const warned = new Set();    // unroutable files we already logged about
+const extracting = new Set(); // zips currently being unpacked (skip re-entry)
 
 // A lone .bin usually means Genesis, but next to a same-named .cue it's a
-// PS1 disc image and must stay with its cue sheet. Zips get sniffed.
-function routeIncoming(file, siblings, fullPath) {
+// PS1 disc image and must stay with its cue sheet. (Console zips never
+// reach here — sortIncoming unpacks them first.)
+function routeIncoming(file, siblings) {
   const ext = path.extname(file).toLowerCase();
   const base = file.slice(0, -ext.length).replace(/\s*\(track \d+\)/i, '');
   if (ext === '.bin') {
     const hasCue = siblings.some(f => f.toLowerCase() === (base + '.cue').toLowerCase())
       || fs.existsSync(path.join(ROMS_DIR, 'psx', base + '.cue'));
     if (hasCue) return 'psx';
-  }
-  if (ext === '.zip') {
-    const sniffed = sniffZipSystem(fullPath);
-    if (sniffed) return sniffed;
   }
   return routeFor(file);
 }
@@ -155,7 +242,34 @@ function sortIncoming(onChange) {
     seen.set(file, { size: st.size, mtime: st.mtimeMs });
     if (!prev || prev.size !== st.size || prev.mtime !== st.mtimeMs) continue;
 
-    const systemId = routeIncoming(file, files, src);
+    // Console games inside zips get unpacked to their system, not moved.
+    if (path.extname(file).toLowerCase() === '.zip' && !extracting.has(src)) {
+      const entries = zipEntries(src);
+      const sniffed = sniffEntries(entries);
+      if (sniffed) {
+        extracting.add(src);
+        extractConsoleZip(src, entries)
+          .then(done => {
+            if (!done.length) throw new Error('nothing extractable');
+            fs.unlinkSync(src);
+            seen.delete(file);
+            console.log(`roms: unpacked ${INCOMING}/${file} → ${done.map(d => `${d.system}/${d.file}`).join(', ')}`);
+            onChange?.();
+          })
+          .catch(e => {
+            console.error(`roms: could not unpack ${file}:`, e.message);
+            try { // park the zip with its sniffed system rather than lose it
+              fs.mkdirSync(path.join(ROMS_DIR, sniffed), { recursive: true });
+              fs.renameSync(src, path.join(ROMS_DIR, sniffed, file));
+              onChange?.();
+            } catch {}
+          })
+          .finally(() => extracting.delete(src));
+        continue;
+      }
+    }
+
+    const systemId = routeIncoming(file, files);
     if (!systemId) {
       if (!warned.has(file)) {
         warned.add(file);
@@ -179,10 +293,36 @@ function sortIncoming(onChange) {
   if (moved) onChange?.();
 }
 
+// One-time self-heal at boot: older versions parked every .zip in arcade/,
+// including zipped console games — unpack any of those into their systems.
+// Genuine arcade sets sniff to nothing and are left exactly as they are.
+async function rescueMisplacedZips(onChange) {
+  const dir = path.join(ROMS_DIR, 'arcade');
+  let files = [];
+  try { files = fs.readdirSync(dir).filter(f => f.toLowerCase().endsWith('.zip')); } catch { return; }
+  for (const file of files) {
+    const src = path.join(dir, file);
+    const entries = zipEntries(src);
+    const sniffed = sniffEntries(entries);
+    if (!sniffed) continue;
+    try {
+      const done = await extractConsoleZip(src, entries);
+      if (done.length) {
+        fs.unlinkSync(src);
+        console.log(`roms: rescued arcade/${file} → ${done.map(d => `${d.system}/${d.file}`).join(', ')}`);
+        onChange?.();
+      }
+    } catch (e) {
+      console.error(`roms: could not rescue arcade/${file}:`, e.message);
+    }
+  }
+}
+
 export function startIncomingSorter({ onChange }) {
   const timer = setInterval(() => sortIncoming(onChange), SORT_INTERVAL);
   timer.unref?.();
   sortIncoming(onChange);
+  rescueMisplacedZips(onChange).catch(() => {});
 }
 
 export function romsRouter({ onChange }) {
@@ -231,18 +371,31 @@ export function romsRouter({ onChange }) {
     });
     req.on('aborted', () => abort(400, 'Upload interrupted'));
     out.on('error', e => abort(500, 'Could not write file: ' + e.message));
-    out.on('finish', () => {
+    out.on('finish', async () => {
       if (failed) return;
-      // Auto-routed zips: now that the bytes are on disk, look inside —
-      // a zipped console ROM belongs with its console, not in arcade.
       let finalSystem = systemId;
       let finalDest = dest;
+      // Auto-routed zips: now that the bytes are on disk, look inside — a
+      // zipped console game gets unpacked into its system; only true
+      // arcade sets stay zipped.
       if (wanted === 'auto' && path.extname(name).toLowerCase() === '.zip') {
-        const sniffed = sniffZipSystem(tmp);
-        const sniffedDir = sniffed && sniffed !== systemId && systemDir(sniffed);
-        if (sniffedDir) {
+        const entries = zipEntries(tmp);
+        const sniffed = sniffEntries(entries);
+        if (sniffed && systemDir(sniffed)) {
+          try {
+            const done = await extractConsoleZip(tmp, entries);
+            if (done.length) {
+              fs.unlinkSync(tmp);
+              console.log(`roms: uploaded ${name} → unpacked ${done.map(d => `${d.system}/${d.file}`).join(', ')}`);
+              onChange?.();
+              return res.json({ ok: true, system: done[0].system, file: done[0].file, size: written, unpacked: done });
+            }
+          } catch (e) {
+            console.error(`roms: could not unpack ${name}:`, e.message);
+          }
+          // Couldn't unpack — at least park the zip with the right system.
           finalSystem = sniffed;
-          finalDest = path.join(sniffedDir, name);
+          finalDest = path.join(systemDir(sniffed), name);
         }
       }
       try {
