@@ -16,7 +16,7 @@ export const player = {
     if (pub.phase === 'bet') {
       if (priv.betting) {
         kids.push(h('div', { class: 'banner hot center' }, 'Place your bet'));
-        kids.push(h('div', { class: 'row wrap', style: 'justify-content:center;margin-top:14px' },
+        kids.push(h('div', { class: 'row wrap', style: 'justify-content:center;align-content:center;margin-top:14px;flex:1' },
           CHIP_VALUES.filter(v => v <= bank).map(v =>
             h('button', {
               class: 'tok', style: 'width:74px;height:74px;border-radius:50%;font-size:18px',
@@ -34,7 +34,8 @@ export const player = {
     } else {
       const myHand = pub.hands[you] || [];
       const val = pub.values[you];
-      kids.push(h('div', { class: 'row', style: 'justify-content:center;margin:8px 0' },
+      // margin-top:auto sinks your cards + result toward your thumbs
+      kids.push(h('div', { class: 'row', style: 'justify-content:center;margin:auto 0 8px' },
         myHand.map(c => cardEl(c, { size: 'lg', button: false }))));
       if (myHand.length) {
         kids.push(h('div', { class: 'center', style: 'font-size:22px;font-weight:800' },

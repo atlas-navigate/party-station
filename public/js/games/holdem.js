@@ -18,7 +18,8 @@ export const player = {
       mount(el, ...kids); return;
     }
 
-    kids.push(h('div', { class: 'row', style: 'justify-content:center;margin:10px 0' },
+    // flex:1 floats your hole cards mid-screen; banners/actions sit below
+    kids.push(h('div', { class: 'row', style: 'justify-content:center;margin:10px 0;flex:1' },
       priv.hole
         ? priv.hole.map(c => cardEl(c, { size: 'lg', button: false }))
         : [cardEl('back', { size: 'lg' }), cardEl('back', { size: 'lg' })]));

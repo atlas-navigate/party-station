@@ -39,7 +39,8 @@ export const player = {
         yourTurn ? 'Your turn — play a card' : `${seats[pub.turn]?.name}’s turn…`,
         pub.heartsBroken ? ' 💔' : ''));
       if (pub.trick.length) {
-        kids.push(h('div', { class: 'row', style: 'justify-content:center;margin-top:10px' },
+        // flex:1 floats the trick mid-screen, between the banner and your hand
+        kids.push(h('div', { class: 'row', style: 'justify-content:center;align-items:center;flex:1;margin-top:10px' },
           pub.trick.map(t => cardEl(t.card, { size: 'sm', button: false }))));
       }
       kids.push(handStrip(priv.hand, {

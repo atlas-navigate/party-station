@@ -99,8 +99,8 @@ h2 { font-size: 20px; font-weight: 800; }
 .game-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .game-tile {
   position: relative;
-  display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
-  padding: 18px 16px; min-height: 150px;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 8px;
+  padding: 20px 16px; min-height: 172px;
   border-radius: 16px; border: none; cursor: pointer;
   background: var(--raised);
   box-shadow: 0 5px 0 var(--edge);
@@ -108,8 +108,8 @@ h2 { font-size: 20px; font-weight: 800; }
   transition: transform .08s, box-shadow .08s;
 }
 .game-tile:active { transform: translateY(4px); box-shadow: 0 1px 0 var(--edge); }
-.game-tile .g-icon { font-size: 48px; line-height: 1; }
-.game-tile .g-name { font-weight: 800; font-size: 19px; }
+.game-tile .g-icon { font-size: 58px; line-height: 1; }
+.game-tile .g-name { font-weight: 800; font-size: 21px; }
 .game-tile .g-sub { font-size: 13px; color: var(--chalk-dim); }
 .game-tile.cat-cards  { box-shadow: 0 5px 0 var(--cards-edge);  background: linear-gradient(160deg, var(--raised), #3a2333); }
 .game-tile.cat-board  { box-shadow: 0 5px 0 var(--board-edge);  background: linear-gradient(160deg, var(--raised), #1d3a33); }
@@ -168,25 +168,28 @@ h2 { font-size: 20px; font-weight: 800; }
 .pcard.sm { width: 40px; height: 56px; border-radius: 6px; padding: 3px 4px; }
 .pcard.sm .r { font-size: 13px; } .pcard.sm .s { font-size: 14px; }
 
-/* Your hand on the phone: a vertical cascade (each card overlapping the one
-   below, corner rank visible) instead of a sideways-scrolling row — every
-   card readable at a glance. Selected/played picks slide out to the right.
-   The overlap adapts to hand size (--n, set by handStrip) so the whole hand
-   always fits in one view without scrolling. */
+/* Your hand on the phone: fanned rows like really held cards — cards overlap
+   sideways (left-corner rank visible), tilt away from the middle and droop
+   at the edges (--rot/--lift set per card by handStrip), and big hands split
+   into extra fanned rows so everything fits one view with no scrolling.
+   margin-top:auto sinks the hand to the bottom of the (flex) game screen,
+   where hands live. Selected picks pop up out of the fan. */
 .hand {
-  --n: 13;
+  margin-top: auto;
   display: flex; flex-direction: column; align-items: center;
-  padding: 12px 4px 10px; max-height: 46vh; overflow-y: auto;
-  scrollbar-width: none;
+  gap: 14px; padding: 20px 0 10px;
 }
-.hand::-webkit-scrollbar { display: none; }
-.hand .pcard { width: 74px; height: 104px; }
-.hand .pcard .r { font-size: 21px; }
-.hand .pcard + .pcard {
-  /* strip = space budget split across the hand, clamped to stay readable */
-  margin-top: calc(clamp(15px, (min(42vh, 400px) - 104px) / max(var(--n) - 1, 1), 28px) - 104px);
+.hand-row { display: flex; justify-content: center; }
+.hand-row .pcard {
+  width: 80px; height: 112px;
+  transform: rotate(var(--rot, 0deg)) translateY(var(--lift, 0px));
 }
-.hand .pcard.sel { transform: translateX(32px); }
+.hand-row .pcard .r { font-size: 20px; }
+.hand-row .pcard + .pcard { margin-left: -36px; }
+.hand-row .pcard.sel {
+  transform: rotate(var(--rot, 0deg)) translateY(calc(var(--lift, 0px) - 26px));
+  z-index: 2;
+}
 
 /* ---------------------------------------------------------------- bars */
 .actionbar {

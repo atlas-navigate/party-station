@@ -55,14 +55,31 @@ export function cardEl(card, opts = {}) {
 }
 
 export function handStrip(cards, { legal = null, selected = [], onTap, size = '' } = {}) {
-  // --n lets the CSS shrink the cascade overlap as the hand grows, so the
-  // whole hand always fits on screen in one view (no scrolling).
-  return h('div', { class: 'hand', style: `--n:${Math.max(cards.length, 1)}` }, cards.map(c => cardEl(c, {
-    size,
-    sel: selected.includes(c),
-    dis: legal && !legal.includes(c),
-    onclick: onTap ? () => onTap(c) : undefined,
-  })));
+  // Split the hand into near-equal rows sized to the phone width, then fan
+  // each row like really held cards: every card tilts away from the row's
+  // middle (--rot) and the edges droop slightly (--lift, along the card's
+  // own axis). Overlap step must match .hand-row's -36px card margin.
+  const usable = Math.min(window.innerWidth || 400, 560) - 48; // screen+hand padding
+  const cap = Math.max(4, Math.floor((usable - 80) / 44) + 1);
+  const nRows = Math.max(1, Math.ceil(cards.length / cap));
+  const per = Math.ceil(cards.length / nRows);
+  const rows = [];
+  for (let i = 0; i < cards.length; i += per) rows.push(cards.slice(i, i + per));
+  return h('div', { class: 'hand' }, rows.map(row => {
+    const mid = (row.length - 1) / 2;
+    const tilt = Math.min(4, 26 / Math.max(row.length, 1));
+    return h('div', { class: 'hand-row' }, row.map((c, i) => {
+      const el = cardEl(c, {
+        size,
+        sel: selected.includes(c),
+        dis: legal && !legal.includes(c),
+        onclick: onTap ? () => onTap(c) : undefined,
+      });
+      el.style.setProperty('--rot', ((i - mid) * tilt).toFixed(2) + 'deg');
+      el.style.setProperty('--lift', (Math.abs(i - mid) ** 2 * 1.6).toFixed(1) + 'px');
+      return el;
+    }));
+  }));
 }
 
 // Adapts a per-sync 2D TV render function to the console shell's scene API

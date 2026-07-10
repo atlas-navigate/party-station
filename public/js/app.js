@@ -74,14 +74,14 @@ function chooseScreen() {
     wordmark(),
     h('p', { class: 'center dim', style: 'margin:8px 0 20px' }, 'What are we playing?'),
     h('button', {
-      class: 'game-tile cat-cards', style: 'min-height:130px',
+      class: 'game-tile cat-cards', style: 'flex:1;min-height:150px;justify-content:center',
       onclick: () => { hubMode = 'party'; render(); },
     },
       h('span', { class: 'g-icon' }, '🃏'),
       h('span', { class: 'g-name' }, 'Party Games'),
       h('span', { class: 'g-sub' }, 'Card games — phones and controllers')),
     h('button', {
-      class: 'game-tile cat-arcade', style: 'min-height:130px',
+      class: 'game-tile cat-arcade', style: 'flex:1;min-height:150px;justify-content:center',
       onclick: () => { hubMode = 'retro'; render(); },
     },
       h('span', { class: 'g-icon' }, '🕹️'),
@@ -108,11 +108,11 @@ function hubTopbar(title) {
 function hubScreen() {
   if (hubMode === 'retro') return retroScreen();
   const games = sync.games;
-  return h('div', { class: 'screen' },
+  return h('div', { class: 'screen', style: 'display:flex;flex-direction:column;min-height:100vh;padding-bottom:24px' },
     hubTopbar('Pick a game'),
     sync.tvCount === 0 && h('div', { class: 'banner', style: 'margin-bottom:12px;font-size:13px;' },
       '📺 No big screen yet — open ', h('b', {}, location.host + '/tv'), ' on the TV for the full experience.'),
-    h('div', { class: 'game-grid' }, games.map(g => {
+    h('div', { class: 'game-grid', style: 'flex:1;grid-auto-rows:1fr;align-content:stretch' }, games.map(g => {
       const save = sync.saves[g.id];
       return h('button', { class: `game-tile cat-${g.category}`, onclick: () => gameSheet(g, save) },
         save && h('span', { class: 'g-save' }, 'SAVED'),
@@ -311,7 +311,9 @@ function gameScreen() {
   }
 
   padActive = false;
-  const container = h('div', {});
+  // Flex column so games spread over the whole phone screen — the fanned
+  // hand (.hand, margin-top:auto) sinks to the bottom like held cards.
+  const container = h('div', { style: 'flex:1;display:flex;flex-direction:column' });
   const ctx = {
     sync, game: G, pub: G.pub, priv: G.priv, you: G.yourSeat, seats: G.seats,
     send: a => net.send({ t: 'act', a }),
@@ -325,7 +327,7 @@ function gameScreen() {
     mod.player.render(container, ctx);
   }
 
-  return h('div', { class: 'screen' },
+  return h('div', { class: 'screen', style: 'display:flex;flex-direction:column;min-height:100vh' },
     h('div', { class: 'topbar' },
       h('div', { class: 'row' }, h('span', { style: 'font-size:22px' }, g.icon), h('h2', {}, g.name)),
       h('div', { class: 'row' },

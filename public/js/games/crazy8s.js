@@ -12,7 +12,8 @@ export const player = {
     const canPass = yourTurn && !priv.legal.length && (pub.drawn >= pub.maxDraws || !pub.deckCount);
 
     mount(el,
-      h('div', { class: 'row', style: 'justify-content:center;gap:14px;margin:6px 0 4px' },
+      // flex:1 floats the discard/suit mid-screen; turn banner sits by your hand
+      h('div', { class: 'row', style: 'justify-content:center;gap:14px;margin:6px 0 4px;flex:1' },
         cardEl(pub.top, { button: false }),
         h('div', {},
           h('div', { class: 'eyebrow' }, 'Suit'),
