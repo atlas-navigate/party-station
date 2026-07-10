@@ -259,6 +259,9 @@ select.field {
 
 /* =================================================================== TV */
 body.tv { overflow: hidden; font-size: 22px; }
+/* The TV is a console screen driven by pads and phones — never show the
+   kiosk's mouse cursor (elements set their own cursor, hence the *). */
+body.tv, body.tv * { cursor: none !important; }
 body.tv .tv-stage {
   height: 100vh; display: flex; flex-direction: column; padding: 28px 40px;
 }
@@ -279,6 +282,35 @@ canvas.arcade { background: var(--felt-deep); border-radius: 18px; box-shadow: 0
 
 /* Console additions */
 .tv-scene { flex: 1; min-height: 0; position: relative; }
+
+/* TV hub shelves: take the whole screen — content centers vertically when it
+   fits and scrolls (pad cursor drags it along) when it doesn't. */
+.hub-fill { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; scrollbar-width: none; }
+.hub-fill::-webkit-scrollbar { display: none; }
+.hub-center { margin: auto 0; padding: 6px; }
+.hub-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 22px; }
+.hub-grid .game-tile { min-height: 300px; align-items: center; justify-content: center; text-align: center; gap: 12px; }
+.hub-grid .g-icon { font-size: 84px; }
+
+/* Retro hub: box-art shelves, one centered row of covers per system. Art
+   fades in when /api/art has (or fetches) a cover; until then the system's
+   icon stands in. */
+.rom-grid { display: flex; flex-wrap: wrap; justify-content: center; gap: 18px; }
+.rom-tile { width: 218px; display: flex; flex-direction: column; align-items: stretch; gap: 10px; padding: 12px; min-height: 0; }
+.rom-tile .g-name { font-size: 17px; line-height: 1.25; text-align: center; }
+.rom-art {
+  position: relative; height: 232px; border-radius: 10px; overflow: hidden;
+  background: var(--felt-deep);
+  display: flex; align-items: center; justify-content: center;
+}
+.rom-art img { max-width: 100%; max-height: 100%; object-fit: contain; opacity: 0; transition: opacity .2s; }
+.rom-art.haveart img { opacity: 1; }
+.rom-art .rom-fallback { position: absolute; font-size: 62px; }
+.rom-art.haveart .rom-fallback { display: none; }
+
+.arcade-icon { display: inline-flex; }
+.arcade-icon svg { width: 100%; height: 100%; }
+
 .tv-focus { outline: 4px solid var(--marquee); outline-offset: 2px; transform: scale(1.04); }
 .tv-hints {
   display: flex; gap: 26px; justify-content: center; padding-top: 12px;

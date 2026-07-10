@@ -79,6 +79,39 @@ const cleanTitle = f => f
   .replace(/\s*[\(\[][^\)\]]*[\)\]]/g, '') // strip (USA) [!] region tags
   .trim() || f;
 
+// MAME zips are named by terse shortnames (mk2.zip, nbajam.zip) — map the
+// common ones to real titles so the hub reads properly and box-art lookups
+// (server/art.js matches by title) can find them.
+const ARCADE_TITLES = {
+  '10yard': '10-Yard Fight', 1942: '1942', 1943: '1943', 1944: '1944',
+  arkanoid: 'Arkanoid', asteroid: 'Asteroids', berzerk: 'Berzerk',
+  blitz: 'NFL Blitz', blitz99: 'NFL Blitz ’99', bombjack: 'Bomb Jack',
+  btime: 'Burger Time', centiped: 'Centipede', contra: 'Contra',
+  ddragon: 'Double Dragon', defender: 'Defender', digdug: 'Dig Dug',
+  dkong: 'Donkey Kong', dkongjr: 'Donkey Kong Junior', frogger: 'Frogger',
+  galaga: 'Galaga', galaxian: 'Galaxian', gauntlet: 'Gauntlet',
+  joust: 'Joust', klax: 'Klax', kof98: 'The King of Fighters ’98',
+  kungfum: 'Kung-Fu Master', marble: 'Marble Madness',
+  missile: 'Missile Command', mk: 'Mortal Kombat', mk2: 'Mortal Kombat II',
+  mk3: 'Mortal Kombat 3', mslug: 'Metal Slug', mslug2: 'Metal Slug 2',
+  mslug3: 'Metal Slug 3', mslugx: 'Metal Slug X', mspacman: 'Ms. Pac-Man',
+  nbajam: 'NBA Jam', nbajamte: 'NBA Jam T.E.', outrun: 'Out Run',
+  pacman: 'Pac-Man', paperboy: 'Paperboy', phoenix: 'Phoenix',
+  popeye: 'Popeye', puckman: 'Puck Man', punchout: 'Punch-Out!!',
+  qbert: 'Q*bert', rampage: 'Rampage', robotron: 'Robotron 2084',
+  scramble: 'Scramble', sf2: 'Street Fighter II', simpsons: 'The Simpsons',
+  sinistar: 'Sinistar', spyhunt: 'Spy Hunter', tempest: 'Tempest',
+  tmnt: 'Teenage Mutant Ninja Turtles', tron: 'Tron',
+  umk3: 'Ultimate Mortal Kombat 3', xmen: 'X-Men', zaxxon: 'Zaxxon',
+};
+const ARCADE_SYSTEMS = new Set(['arcade', 'mame-libretro', 'fba']);
+
+export function romTitle(systemId, file) {
+  const base = file.replace(/\.[^.]+$/, '').toLowerCase();
+  if (ARCADE_SYSTEMS.has(systemId) && ARCADE_TITLES[base]) return ARCADE_TITLES[base];
+  return cleanTitle(file);
+}
+
 export function scan(force = false) {
   if (!force && Date.now() - scanned.at < 60_000) return scanned.systems;
   const systems = [];
@@ -94,7 +127,7 @@ export function scan(force = false) {
       const games = files
         .filter(f => sys.ext.includes(path.extname(f).toLowerCase()))
         .sort()
-        .map(f => ({ file: f, title: cleanTitle(f) }));
+        .map(f => ({ file: f, title: romTitle(sys.id, f) }));
       if (games.length) {
         seen.add(sys.name);
         systems.push({ id: sys.id, name: sys.name, icon: sys.icon, core, games });

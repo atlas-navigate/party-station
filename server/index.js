@@ -9,6 +9,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { WebSocketServer } from 'ws';
 import { handleConnection, isIdle, notifyClients } from './lobby.js';
+import { getArt } from './art.js';
 import { defaultAudioToHdmi } from './audio.js';
 import * as emulator from './emulator.js';
 import { romsRouter, startIncomingSorter } from './roms.js';
@@ -24,6 +25,13 @@ app.get('/roms', (_req, res) => res.sendFile(path.join(ROOT, 'public', 'roms.htm
 app.use('/api/roms', romsRouter({
   onChange: () => { emulator.scan(true); notifyClients(); },
 }));
+// Box art for the retro hub: cached cover, or fetched on first browse
+// (see server/art.js). 404 = no cover known; the TV shows an icon instead.
+app.get('/api/art/:system/:file', async (req, res) => {
+  const p = await getArt(req.params.system, req.params.file).catch(() => null);
+  if (p) res.sendFile(p);
+  else res.status(404).set('Cache-Control', 'no-store').json({ ok: false });
+});
 // Ctrl+Alt+Q on the TV (attached keyboard) lands here: flag the kiosk
 // launcher (scripts/kiosk.sh watches for this file) to close Chromium and
 // stop relaunching, dropping to the Pi desktop for troubleshooting.

@@ -163,8 +163,11 @@ whichever way is easiest:
 - **Manually:** the classic `~/RetroPie/roms/<system>/` folders still work.
 
 Either way the games appear under **🕹️ Retro Games** on the TV and phones
-within a moment — no restart. Launching one starts RetroArch fullscreen on
-the Pi's HDMI output; Bluetooth controllers work in it natively (that's
+within a moment — no restart. The TV shows each game's **box art**: covers
+are fetched once from the libretro thumbnails server (matched by title)
+and cached in `data/art/`, so they keep working at an offline party; games
+without a match just show the system icon. Launching one starts RetroArch
+fullscreen on the Pi's HDMI output; Bluetooth controllers work in it natively (that's
 their home turf). Exit with **Select+Start** and Party Station takes the
 screen back — phones also get a force-quit button just in case.
 
