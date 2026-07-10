@@ -1,48 +1,74 @@
-// Hearts — classic 4-player trick-taking. Pass 3 cards (left/right/across/hold
-// cycle), avoid hearts (1pt) and the queen of spades (13pts). Shooting the moon
-// gives everyone else 26. Lowest score when someone hits the target wins.
+// Hearts — classic trick-taking for 4–6 players. Pass 3 cards (left/right/
+// across cycle), avoid hearts (1pt) and the queen of spades (13pts). Shooting
+// the moon gives everyone else 26. Lowest score when someone hits the target
+// wins. With 5–6 players a few low clubs/diamonds sit out so the deal comes
+// out even (every heart and the queen stay in — the moon is always 26).
+//
+// Flow: a finished trick stays face-up on the table (sweep pause) before the
+// winner gathers it, and each round ends on a score summary — the lobby
+// drives these via pending()/tick().
 import { freshDeck, sortHand, removeCard, rank, suit, rv } from './util.js';
 
 export const meta = {
   id: 'hearts', name: 'Hearts', tagline: 'Dodge the queen of spades',
   icon: '🂱', emoji: '💔', category: 'cards', mode: 'server',
-  minPlayers: 4, maxPlayers: 4, saveable: true,
+  minPlayers: 4, maxPlayers: 6, saveable: true,
   options: [
     { key: 'target', label: 'Play to', type: 'select', def: 100,
       choices: [{ v: 50, label: '50 points' }, { v: 100, label: '100 points' }] },
   ],
 };
 
-const PASS_DIRS = [1, 3, 2, 0]; // left, right, across, hold (seat offsets)
+const SWEEP_MS = 2200;  // finished trick shown face-up before it's gathered
+const ROUND_MS = 5000;  // round score summary before the next deal
+
+// Cards set aside so 52 divides evenly (never hearts, never the queen).
+const SIT_OUT = { 4: [], 5: ['2d', '2c'], 6: ['2d', '2c', '3d', '3c'] };
+
+// Pass-direction cycle: left, right, then closer seats, then a hold round —
+// the classic [left, right, across, hold] when 4 play.
+function passDirs(n) {
+  const dirs = [];
+  for (let k = 1; k <= Math.floor((n - 1) / 2); k++) dirs.push(k, n - k);
+  if (n % 2 === 0) dirs.push(n / 2);
+  dirs.push(0);
+  return dirs;
+}
 
 function deal(st) {
-  const deck = freshDeck();
-  st.hands = [[], [], [], []];
-  for (let i = 0; i < 52; i++) st.hands[i % 4].push(deck[i]);
+  const n = st.n;
+  const deck = freshDeck().filter(c => !(SIT_OUT[n] || []).includes(c));
+  st.hands = Array.from({ length: n }, () => []);
+  for (let i = 0; i < deck.length; i++) st.hands[i % n].push(deck[i]);
   st.hands.forEach(sortHand);
-  st.dir = PASS_DIRS[st.round % 4];
-  st.passed = [null, null, null, null];
+  // The lowest club still in the deck opens the round (2♣ unless it sat out).
+  st.open = ['2c', '3c', '4c'].find(c => st.hands.some(hd => hd.includes(c)));
+  const dirs = passDirs(n);
+  st.dir = dirs[st.round % dirs.length];
+  st.passed = Array(n).fill(null);
   st.trick = [];
-  st.taken = [[], [], [], []];
+  st.taken = Array.from({ length: n }, () => []);
   st.heartsBroken = false;
   st.firstTrick = true;
   st.lastTrick = null;
+  st.sweep = null;
   if (st.dir === 0) startPlay(st);
   else st.phase = 'pass';
 }
 
 function startPlay(st) {
   st.phase = 'play';
-  st.turn = st.hands.findIndex(h => h.includes('2c'));
+  st.turn = st.hands.findIndex(h => h.includes(st.open));
 }
 
 function applyPasses(st) {
-  const incoming = [[], [], [], []];
-  for (let i = 0; i < 4; i++) {
+  const n = st.n;
+  const incoming = Array.from({ length: n }, () => []);
+  for (let i = 0; i < n; i++) {
     for (const c of st.passed[i]) removeCard(st.hands[i], c);
-    incoming[(i + st.dir) % 4] = st.passed[i];
+    incoming[(i + st.dir) % n] = st.passed[i];
   }
-  for (let i = 0; i < 4; i++) { st.hands[i].push(...incoming[i]); sortHand(st.hands[i]); }
+  for (let i = 0; i < n; i++) { st.hands[i].push(...incoming[i]); sortHand(st.hands[i]); }
   startPlay(st);
 }
 
@@ -50,7 +76,7 @@ function legalPlays(st, seat) {
   const hand = st.hands[seat];
   const isPoint = c => suit(c) === 'h' || c === 'Qs';
   if (!st.trick.length) {
-    if (st.firstTrick) return hand.includes('2c') ? ['2c'] : hand;
+    if (st.firstTrick) return hand.includes(st.open) ? [st.open] : hand;
     if (!st.heartsBroken) {
       const nonHearts = hand.filter(c => suit(c) !== 'h');
       if (nonHearts.length) return nonHearts;
@@ -75,28 +101,26 @@ function endRound(st) {
   const roundPts = st.taken.map(points);
   const shooter = roundPts.findIndex(p => p === 26);
   st.lastRound = [];
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < st.n; i++) {
     const add = shooter >= 0 ? (i === shooter ? 0 : 26) : roundPts[i];
     st.scores[i] += add;
     st.lastRound.push(add);
   }
   st.shooter = shooter;
-  if (st.scores.some(s => s >= st.target)) {
-    st.phase = 'over';
-  } else {
-    st.round++;
-    deal(st);
-  }
+  st.phase = 'roundEnd'; // linger on the summary; tick() deals the next round
 }
 
 function make(seats, options, st) {
+  // Saves from the 4-player-only era carry no seat count or opening card.
+  st.n = st.n || (st.hands ? st.hands.length : 4);
+  st.open = st.open || '2c';
   return {
     state: st,
     pub() {
       return {
         phase: st.phase, scores: st.scores, round: st.round + 1, target: st.target,
         dir: st.dir, turn: st.turn,
-        trick: st.trick, lastTrick: st.lastTrick,
+        trick: st.trick, lastTrick: st.lastTrick, sweep: st.sweep,
         handCounts: st.hands.map(h => h.length),
         passedFlags: st.passed ? st.passed.map(p => !!p) : null,
         heartsBroken: st.heartsBroken,
@@ -112,9 +136,31 @@ function make(seats, options, st) {
       };
     },
     awaiting() {
-      if (st.phase === 'pass') return [0, 1, 2, 3].filter(i => !st.passed[i]);
-      if (st.phase === 'play') return [st.turn];
+      if (st.phase === 'pass') return st.hands.map((_, i) => i).filter(i => !st.passed[i]);
+      if (st.phase === 'play') return st.sweep ? [] : [st.turn];
       return [];
+    },
+    // Timed display states: the lobby (or simulator) calls tick() after
+    // pending() milliseconds whenever nobody is awaited.
+    pending() {
+      if (st.phase === 'play' && st.sweep) return SWEEP_MS;
+      if (st.phase === 'roundEnd') return ROUND_MS;
+      return null;
+    },
+    tick() {
+      if (st.phase === 'play' && st.sweep) {
+        const winner = st.sweep.winner;
+        st.taken[winner].push(...st.trick.map(t => t.card));
+        st.lastTrick = { cards: st.trick, winner };
+        st.trick = [];
+        st.firstTrick = false;
+        st.sweep = null;
+        st.turn = winner;
+        if (st.hands.every(h => !h.length)) endRound(st);
+      } else if (st.phase === 'roundEnd') {
+        if (st.scores.some(s => s >= st.target)) st.phase = 'over';
+        else { st.round++; deal(st); }
+      }
     },
     act(seat, a) {
       if (st.phase === 'pass' && a.t === 'pass') {
@@ -127,25 +173,23 @@ function make(seats, options, st) {
         return {};
       }
       if (st.phase === 'play' && a.t === 'play') {
+        if (st.sweep) return { err: 'Trick is being gathered…' };
         if (seat !== st.turn) return { err: 'Not your turn' };
         if (!legalPlays(st, seat).includes(a.card)) return { err: 'You can’t play that card' };
         removeCard(st.hands[seat], a.card);
         st.trick.push({ seat, card: a.card });
         if (suit(a.card) === 'h') st.heartsBroken = true;
-        if (st.trick.length === 4) {
+        if (st.trick.length === st.n) {
+          // Leave the full trick face-up; tick() sweeps it after the pause.
           const lead = suit(st.trick[0].card);
           let win = st.trick[0];
           for (const t of st.trick) {
             if (suit(t.card) === lead && rv(t.card) > rv(win.card)) win = t;
           }
-          st.taken[win.seat].push(...st.trick.map(t => t.card));
-          st.lastTrick = { cards: st.trick, winner: win.seat };
-          st.trick = [];
-          st.firstTrick = false;
-          st.turn = win.seat;
-          if (st.hands.every(h => !h.length)) endRound(st);
+          st.sweep = { winner: win.seat, pts: points(st.trick.map(t => t.card)) };
+          st.turn = -1;
         } else {
-          st.turn = (st.turn + 1) % 4;
+          st.turn = (st.turn + 1) % st.n;
         }
         return {};
       }
@@ -177,7 +221,7 @@ function make(seats, options, st) {
           // (unless we're last and the trick is pointless — then take it high).
           const ducks = following.filter(c => rv(c) < rv(winning)).sort((a, b) => rv(b) - rv(a));
           if (ducks.length) return { t: 'play', card: ducks[0] };
-          const last = st.trick.length === 3;
+          const last = st.trick.length === st.n - 1;
           const trickPts = points(st.trick.map(t => t.card));
           if (last && trickPts === 0) {
             return { t: 'play', card: following.sort((a, b) => rv(b) - rv(a))[0] };
@@ -207,8 +251,9 @@ function make(seats, options, st) {
 
 export function create({ seats, options }) {
   const st = {
+    n: seats.length,
     target: options.target || 100,
-    scores: [0, 0, 0, 0], round: 0, shooter: -1,
+    scores: Array(seats.length).fill(0), round: 0, shooter: -1,
   };
   deal(st);
   return make(seats, options, st);

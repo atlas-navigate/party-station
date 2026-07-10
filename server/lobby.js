@@ -177,7 +177,10 @@ function attachPlayer(ws, hello) {
 }
 
 function cleanupSession() {
-  if (session) for (const t of session.botTimers.values()) clearTimeout(t);
+  if (session) {
+    for (const t of session.botTimers.values()) clearTimeout(t);
+    clearTimeout(session.tickTimer);
+  }
   session = null;
 }
 
@@ -286,10 +289,30 @@ function pump() {
     saves.clear(session.gameId);
     for (const t of session.botTimers.values()) clearTimeout(t);
     session.botTimers.clear();
+    clearTimeout(session.tickTimer);
+    session.tickTimer = null;
     return;
   }
   autosave();
   scheduleBots();
+  scheduleTick();
+}
+
+// Timed display states (a finished trick lingering on the table, a round
+// summary): when an engine reports pending(), call its tick() after that
+// long — nobody is awaited during the pause, so bots idle too.
+function scheduleTick() {
+  const g = session.game;
+  if (!g.pending || !g.tick || session.tickTimer) return;
+  const ms = g.pending();
+  if (ms == null) return;
+  session.tickTimer = setTimeout(() => {
+    if (!session || session.game !== g) return;
+    session.tickTimer = null;
+    try { g.tick(); } catch (e) { console.error(`tick crashed in ${session.gameId}:`, e); }
+    pump();
+    broadcast();
+  }, ms);
 }
 
 function scheduleBots() {

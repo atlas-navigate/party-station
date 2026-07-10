@@ -28,7 +28,11 @@ function runOnce(mod, nSeats, runIdx) {
     if (OPEN_ENDED.has(mod.meta.id) && steps >= 5000) return steps;
     if (++steps > cap) throw new Error(`stall: exceeded ${cap} steps (endless loop?)`);
     const waiting = game.awaiting();
-    if (!waiting.length) throw new Error(`stall: over()==null but awaiting()==[] at step ${steps}`);
+    if (!waiting.length) {
+      // Timed display state (trick sweep, round summary) — skip the wait.
+      if (game.pending?.() != null && game.tick) { game.tick(); continue; }
+      throw new Error(`stall: over()==null but awaiting()==[] at step ${steps}`);
+    }
     const seat = waiting[0];
     const action = game.botAct(seat);
     if (!action) throw new Error(`bot has no move for seat ${seat} (awaiting=${waiting})`);
