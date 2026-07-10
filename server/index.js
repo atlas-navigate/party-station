@@ -22,8 +22,17 @@ const app = express();
 app.use(express.static(path.join(ROOT, 'public')));
 app.get('/tv', (_req, res) => res.sendFile(path.join(ROOT, 'public', 'tv.html')));
 app.get('/roms', (_req, res) => res.sendFile(path.join(ROOT, 'public', 'roms.html')));
+// Warm the box-art cache while there's likely internet (at boot and the
+// moment a ROM arrives) so covers are on disk before an offline party.
+// getArt dedupes and fails soft, so firing for the whole library is cheap.
+function prefetchArt() {
+  for (const s of emulator.scan()) {
+    for (const g of s.games) getArt(s.id, g.file);
+  }
+}
+
 app.use('/api/roms', romsRouter({
-  onChange: () => { emulator.scan(true); notifyClients(); },
+  onChange: () => { emulator.scan(true); notifyClients(); prefetchArt(); },
 }));
 // Box art for the retro hub: cached cover, or fetched on first browse
 // (see server/art.js). 404 = no cover known; the TV shows an icon instead.
@@ -93,5 +102,6 @@ server.listen(PORT, () => {
 });
 
 updater.init({ isIdle, onStatusChange: notifyClients });
-startIncomingSorter({ onChange: () => { emulator.scan(true); notifyClients(); } });
+startIncomingSorter({ onChange: () => { emulator.scan(true); notifyClients(); prefetchArt(); } });
 defaultAudioToHdmi();
+setTimeout(prefetchArt, 5000); // after boot, once the network is up

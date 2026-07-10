@@ -97,18 +97,40 @@ function handlePad(pad, btn, isRepeat) {
   }
 }
 
-// Hub entries grouped into visual rows (retro: one row per system; party:
-// one row of card games) so the cursor moves the way the screen looks.
+// Hub entries grouped into visual rows (retro: the packed cover grid's rows;
+// party: one row of card games) so the cursor moves the way the screen looks.
 function hubGroups() {
-  if (tvMode === 'retro') {
-    return (sync.emu?.systems || []).map(s =>
-      s.games.map(gm => ({ kind: 'emu', system: s.id, sysName: s.name, icon: s.icon, file: gm.file, title: gm.title })));
-  }
+  if (tvMode === 'retro') return retroLayout().rows;
   if (tvMode === 'party') {
     const row = sync.games.map(g => ({ kind: 'game', g }));
     return row.length ? [row] : [];
   }
   return [];
+}
+
+function retroEnts() {
+  return (sync.emu?.systems || []).flatMap(s =>
+    s.games.map(gm => ({ kind: 'emu', system: s.id, sysName: s.name, icon: s.icon, file: gm.file, title: gm.title })));
+}
+
+// The whole library on one screen: start with big covers and shrink until
+// every row fits the viewport (small libraries get large art, big ones get
+// denser). Below 120px art we give up and let the grid scroll. Both the
+// renderer and the pad cursor use these rows, so navigation matches pixels.
+function retroLayout() {
+  const ents = retroEnts();
+  const availW = window.innerWidth - 96;   // tv-stage padding + slack
+  const availH = window.innerHeight - 250; // top bar, eyebrow, hints, padding
+  for (let artH = 250; ; artH -= 10) {
+    const tileW = Math.max(150, Math.min(230, Math.round(artH * 0.85)));
+    const cols = Math.max(1, Math.floor((availW + 16) / (tileW + 24 + 16)));
+    const rowH = artH + 92; // tile padding + name block + row gap
+    if (Math.ceil(ents.length / cols) * rowH <= availH || artH <= 120) {
+      const rows = [];
+      for (let i = 0; i < ents.length; i += cols) rows.push(ents.slice(i, i + cols));
+      return { rows, artH, tileW };
+    }
+  }
 }
 
 function hubList() { return hubGroups().flat(); }
@@ -318,6 +340,79 @@ function hintBar(hints) {
     hints.map(([k, label]) => h('span', {}, h('b', {}, k), ' ', label)));
 }
 
+// The Pi's Chromium is missing glyphs for several emoji (playing cards
+// especially), so every icon the kiosk depends on is drawn inline as SVG.
+const SUIT_PATHS = {
+  heart: '<path d="M0 9 C-9 2 -12 -2 -12 -6.5 C-12 -10 -9 -12.5 -6 -12.5 C-3.5 -12.5 -1 -11 0 -8.5 C1 -11 3.5 -12.5 6 -12.5 C9 -12.5 12 -10 12 -6.5 C12 -2 9 2 0 9 Z" fill="#d22c47"/>',
+  spade: '<path d="M0 -9 C-9 -2 -12 2 -12 5.5 C-12 8.7 -9.5 10.7 -6.5 10.7 C-4.5 10.7 -2.5 9.8 -1.2 8.2 C-1.8 10.8 -2.9 12.7 -4.3 14 L4.3 14 C2.9 12.7 1.8 10.8 1.2 8.2 C2.5 9.8 4.5 10.7 6.5 10.7 C9.5 10.7 12 8.7 12 5.5 C12 2 9 -2 0 -9 Z" fill="#1c1c28"/>',
+  diamond: '<path d="M0 -12 L8.5 0 L0 12 L-8.5 0 Z" fill="#d22c47"/>',
+  club: '<g fill="#1c1c28"><circle cx="0" cy="-7" r="5.4"/><circle cx="-5.8" cy="1.5" r="5.4"/><circle cx="5.8" cy="1.5" r="5.4"/><path d="M-1.2 0 C-1.8 6 -2.9 10.7 -4.3 12 L4.3 12 C2.9 10.7 1.8 6 1.2 0 Z"/></g>',
+};
+
+// One playing card as an SVG fragment: white face, rank in the corner, big
+// suit pip in the middle. x/y/rot place it inside the icon's viewBox.
+function cardSvg({ x = 0, y = 0, rot = 0, rank = 'A', suit = 'spade', back = false } = {}) {
+  const red = suit === 'heart' || suit === 'diamond';
+  const body = back
+    ? '<rect x="-16" y="-22" width="32" height="44" rx="5" fill="#2d3253" stroke="#10121f" stroke-width="1.5"/>'
+      + '<rect x="-11.5" y="-17.5" width="23" height="35" rx="3" fill="none" stroke="#454b76" stroke-width="2.5"/>'
+    : '<rect x="-16" y="-22" width="32" height="44" rx="5" fill="#fdfbf5" stroke="#b9b4a4" stroke-width="1"/>'
+      + `<text x="-12" y="-11" font-family="system-ui,sans-serif" font-size="12" font-weight="800" fill="${red ? '#d22c47' : '#1c1c28'}">${rank}</text>`
+      + `<g transform="translate(2 5) scale(.9)">${SUIT_PATHS[suit]}</g>`;
+  return `<g transform="translate(${x} ${y}) rotate(${rot})">${body}</g>`;
+}
+
+function svgIcon(size, viewW, viewH, inner) {
+  return h('span', {
+    class: 'arcade-icon',
+    style: `width:${size}px;height:${Math.round(size * viewH / viewW)}px`,
+    html: `<svg viewBox="0 0 ${viewW} ${viewH}" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">${inner}</svg>`,
+  });
+}
+
+// Per-game icons for the hub/lobby/game-over screens. Anything not listed
+// falls back to the emoji the server registry supplies.
+const GAME_ICONS = {
+  hearts: s => svgIcon(s, 64, 56, cardSvg({ x: 32, y: 28, rank: 'A', suit: 'heart' })),
+  crazy8s: s => svgIcon(s, 64, 56,
+    cardSvg({ x: 24, y: 28, rot: -10, rank: '8', suit: 'club' })
+    + cardSvg({ x: 42, y: 29, rot: 9, rank: '8', suit: 'diamond' })),
+  holdem: s => svgIcon(s, 72, 60,
+    cardSvg({ x: 28, y: 26, rot: -12, rank: 'A', suit: 'heart' })
+    + cardSvg({ x: 46, y: 27, rot: 8, rank: 'A', suit: 'spade' })
+    + '<g><circle cx="36" cy="49" r="9.5" fill="#ffb52e" stroke="#b97a10" stroke-width="2"/>'
+    + '<circle cx="36" cy="49" r="5" fill="none" stroke="#b97a10" stroke-width="1.6" stroke-dasharray="2.6 2.2"/></g>'),
+  blackjack: s => svgIcon(s, 68, 58,
+    cardSvg({ x: 26, y: 28, rot: -12, back: true })
+    + cardSvg({ x: 42, y: 28, rot: 7, rank: 'A', suit: 'spade' })),
+  gofish: s => svgIcon(s, 64, 56,
+    cardSvg({ x: 32, y: 28, rank: 'G', suit: 'spade' }).replace(SUIT_PATHS.spade,
+      '<g><ellipse cx="0" cy="0" rx="9.5" ry="6" fill="#4da3ff"/>'
+      + '<path d="M7 0 L14 -6 L14 6 Z" fill="#4da3ff"/>'
+      + '<circle cx="-4.5" cy="-1.5" r="1.4" fill="#10121f"/></g>')),
+};
+
+function gameIcon(g, size) {
+  return GAME_ICONS[g.id]
+    ? GAME_ICONS[g.id](size)
+    : h('span', { style: `font-size:${size * .8}px;line-height:1.2` }, g.icon);
+}
+
+// A game cartridge — box-art placeholder for console games with no cover.
+function cartridgeIcon(size = 48) {
+  return h('span', {
+    class: 'arcade-icon',
+    style: `width:${size}px;height:${Math.round(size * 1.05)}px`,
+    html: `<svg viewBox="0 0 64 67" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <path d="M10 4 h44 q4 0 4 4 v50 q0 4 -4 4 h-32 l-16 -14 v-44 q0 -4 4 -4 z" fill="#4b3a80"/>
+      <rect x="16" y="12" width="32" height="26" rx="3" fill="#10121f"/>
+      <rect x="19" y="15" width="26" height="20" rx="2" fill="#3ecf8e"/>
+      <rect x="22" y="46" width="26" height="10" rx="2" fill="#2d3253"/>
+      <g stroke="#2d3253" stroke-width="2"><line x1="14" y1="8" x2="14" y2="42"/></g>
+    </svg>`,
+  });
+}
+
 // There's no arcade-machine emoji, so the Retro Games icon is a hand-drawn
 // cabinet in the console's own palette (marquee, screen, stick, buttons).
 function arcadeIcon(size = 56) {
@@ -364,7 +459,7 @@ function hubScreen() {
             const g = e.g;
             return h('div', { class: 'game-tile cat-cards' + (i === hubCursor ? ' tv-focus' : '') },
               sync.saves[g.id] && h('div', { class: 'g-save' }, '💾 SAVED'),
-              h('span', { class: 'g-icon' }, g.icon),
+              h('span', { class: 'g-icon' }, gameIcon(g, 92)),
               h('div', { class: 'g-name', style: 'font-size:24px' }, g.name),
               h('div', { class: 'g-sub', style: 'font-size:15px' },
                 `${g.minPlayers === g.maxPlayers ? g.minPlayers : g.minPlayers + '–' + g.maxPlayers} players`));
@@ -409,30 +504,37 @@ function chooseScreen() {
 // move rebuilds the DOM) skip the fade-in so covers don't blink.
 const artSeen = new Set();
 
-function romTile(e, focused) {
+function romTile(e, focused, artH, tileW) {
   const url = `/api/art/${e.system}/${encodeURIComponent(e.file)}`;
-  return h('div', { class: 'game-tile cat-arcade rom-tile' + (focused ? ' tv-focus' : '') },
-    h('div', { class: 'rom-art' + (artSeen.has(url) ? ' haveart' : '') },
+  const isArcade = e.system.startsWith('arcade') || e.system.startsWith('mame') || e.system === 'fba';
+  return h('div', {
+    class: 'game-tile cat-arcade rom-tile' + (focused ? ' tv-focus' : ''),
+    style: `width:${tileW + 24}px`,
+  },
+    h('div', { class: 'rom-art' + (artSeen.has(url) ? ' haveart' : ''), style: `height:${artH}px` },
       h('img', {
         src: url, alt: '', loading: 'lazy',
         onload: ev => { artSeen.add(url); ev.target.parentNode.classList.add('haveart'); },
       }),
-      h('span', { class: 'rom-fallback' }, e.icon)),
-    h('div', { class: 'g-name' }, e.title));
+      h('span', { class: 'rom-fallback' },
+        isArcade ? arcadeIcon(Math.round(artH * .38)) : cartridgeIcon(Math.round(artH * .38))),
+      h('span', { class: 'rom-badge' }, e.sysName.replace(/\s*\(.*\)$/, ''))),
+    h('div', { class: 'rom-name' }, e.title));
 }
 
 function retroHubScreen() {
-  const groups = hubGroups(); // one group per system, in cursor order
+  const { rows, artH, tileW } = retroLayout();
+  const total = retroEnts().length;
   let idx = 0;
   return h('div', { class: 'tv-stage' },
     h('div', { class: 'tv-top' }, wordmark(44), urlBox()),
-    groups.length
+    total
       ? h('div', { class: 'hub-fill' },
         h('div', { class: 'hub-center' },
-          groups.map(ents => h('div', { style: 'margin-bottom:26px' },
-            h('div', { class: 'eyebrow', style: 'font-size:15px;margin-bottom:12px;text-align:center' }, `${ents[0].icon} ${ents[0].sysName}`),
-            h('div', { class: 'rom-grid' },
-              ents.map(e => romTile(e, idx++ === hubCursor)))))))
+          h('div', { class: 'eyebrow', style: 'font-size:15px;margin-bottom:14px;text-align:center' },
+            `Retro games — ${total} in the library`),
+          rows.map(row => h('div', { class: 'rom-row' },
+            row.map(e => romTile(e, idx++ === hubCursor, artH, tileW))))))
       : h('div', { class: 'tv-main' },
         h('div', { class: 'center' },
           arcadeIcon(110),
@@ -451,7 +553,7 @@ function lobbyScreen() {
   const g = sync.games.find(x => x.id === L.gameId);
   return h('div', { class: 'tv-stage' },
     h('div', { class: 'tv-top' },
-      h('div', { class: 'tv-title' }, h('span', { style: 'font-size:44px' }, g.icon), g.name),
+      h('div', { class: 'tv-title' }, gameIcon(g, 52), g.name),
       urlBox()),
     h('div', { class: 'tv-main' },
       h('div', { class: 'center' },
@@ -554,7 +656,7 @@ function gameScreen() {
 
   return h('div', { class: 'tv-stage' },
     h('div', { class: 'tv-top' },
-      h('div', { class: 'tv-title', style: 'font-size:26px' }, h('span', { style: 'font-size:32px' }, g.icon), g.name),
+      h('div', { class: 'tv-title', style: 'font-size:26px' }, gameIcon(g, 38), g.name),
       urlBox()),
     holder,
     h('div', { class: 'pad-menus' }, menuPanels()),
@@ -572,7 +674,7 @@ function gameoverScreen() {
     h('div', { class: 'tv-top' }, wordmark(34), urlBox()),
     h('div', { class: 'tv-main' },
       h('div', { class: 'center' },
-        h('div', { style: 'font-size:110px' }, g.icon),
+        h('div', {}, gameIcon(g, 130)),
         h('div', { class: 'tv-big' }, G.over?.title || 'Game over'),
         h('div', { style: 'font-size:24px;margin-top:14px' },
           (G.over?.lines || []).map(l => h('div', { class: 'dim' }, l))))),

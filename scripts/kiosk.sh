@@ -45,6 +45,25 @@ for _ in $(seq 1 120); do
   sleep 1
 done
 
+# The TV must never show a mouse cursor. CSS hides it once the pointer moves
+# over the page, but the compositor keeps drawing its own arrow until then —
+# so point Chromium at the repo's fully transparent cursor theme (honored by
+# both X11 and Wayland Chromium), and nudge the pointer off-screen if a tool
+# for that exists.
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [ -d "$REPO_DIR/scripts/cursors/blank" ]; then
+  export XCURSOR_PATH="$REPO_DIR/scripts/cursors${XCURSOR_PATH:+:$XCURSOR_PATH}"
+  export XCURSOR_THEME=blank
+  export XCURSOR_SIZE=24
+fi
+hide_pointer() {
+  sleep 8
+  command -v wlrctl >/dev/null 2>&1 && wlrctl pointer move 20000 20000 2>/dev/null
+  if [ -n "${DISPLAY:-}" ] && command -v xdotool >/dev/null 2>&1; then
+    xdotool mousemove 20000 20000 2>/dev/null
+  fi
+}
+
 # Dedicated profile so the kiosk never fights a normal browsing session.
 PROFILE_DIR="${HOME}/.config/party-station-kiosk"
 mkdir -p "$PROFILE_DIR"
@@ -72,6 +91,7 @@ while true; do
     --ozone-platform-hint=auto \
     "$URL" &
   BROWSER_PID=$!
+  hide_pointer &
   while kill -0 "$BROWSER_PID" 2>/dev/null; do
     if [ -e "$STOP_FLAG" ]; then
       kill "$BROWSER_PID" 2>/dev/null

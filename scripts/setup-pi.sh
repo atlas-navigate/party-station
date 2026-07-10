@@ -119,6 +119,10 @@ if [ "${SETUP_KIOSK:-1}" != "0" ]; then
       [ -z "$KIOSK_BROWSER" ] && command -v chromium >/dev/null 2>&1 && KIOSK_BROWSER="chromium"
     fi
     if [ -n "$KIOSK_BROWSER" ]; then
+      # Emoji glyphs for the TV UI, and pointer tools kiosk.sh uses to park
+      # the mouse cursor off-screen (wlrctl on Wayland, xdotool on X11).
+      apt_install fonts-noto-color-emoji wlrctl xdotool >/dev/null 2>&1 || true
+
       # Console behavior: log straight into the desktop, never blank the TV.
       if command -v raspi-config >/dev/null 2>&1; then
         raspi-config nonint do_boot_behaviour B4 >/dev/null 2>&1 || true

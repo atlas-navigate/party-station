@@ -106,9 +106,24 @@ const ARCADE_TITLES = {
 };
 const ARCADE_SYSTEMS = new Set(['arcade', 'mame-libretro', 'fba']);
 
+// MAME clone/revision dumps tack suffixes onto the parent shortname
+// (nbajamr2 = NBA Jam rev 2, 10yardj = the Japan set) — peel "rN" and then
+// one trailing letter before giving up, so revisions inherit the title.
+function arcadeTitle(base) {
+  if (ARCADE_TITLES[base]) return ARCADE_TITLES[base];
+  const noRev = base.replace(/r\d+$/, '');
+  if (noRev !== base && ARCADE_TITLES[noRev]) return ARCADE_TITLES[noRev];
+  const noRegion = noRev.replace(/[a-z]$/, '');
+  if (noRegion !== noRev && ARCADE_TITLES[noRegion]) return ARCADE_TITLES[noRegion];
+  return null;
+}
+
 export function romTitle(systemId, file) {
   const base = file.replace(/\.[^.]+$/, '').toLowerCase();
-  if (ARCADE_SYSTEMS.has(systemId) && ARCADE_TITLES[base]) return ARCADE_TITLES[base];
+  if (ARCADE_SYSTEMS.has(systemId)) {
+    const t = arcadeTitle(base);
+    if (t) return t;
+  }
   return cleanTitle(file);
 }
 
@@ -124,10 +139,16 @@ export function scan(force = false) {
       try { files = fs.readdirSync(dir); } catch { continue; }
       const core = findCore(sys.cores);
       if (!core) continue;
-      const games = files
-        .filter(f => sys.ext.includes(path.extname(f).toLowerCase()))
-        .sort()
-        .map(f => ({ file: f, title: romTitle(sys.id, f) }));
+      // Same title twice = clone/revision dumps of one game (nbajam.zip +
+      // nbajamr2.zip) — show it once; sorted order keeps the parent set.
+      const titles = new Set();
+      const games = [];
+      for (const f of files.filter(f => sys.ext.includes(path.extname(f).toLowerCase())).sort()) {
+        const title = romTitle(sys.id, f);
+        if (titles.has(title)) continue;
+        titles.add(title);
+        games.push({ file: f, title });
+      }
       if (games.length) {
         seen.add(sys.name);
         systems.push({ id: sys.id, name: sys.name, icon: sys.icon, core, games });

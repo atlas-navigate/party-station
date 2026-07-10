@@ -292,16 +292,27 @@ canvas.arcade { background: var(--felt-deep); border-radius: 18px; box-shadow: 0
 .hub-grid .game-tile { min-height: 300px; align-items: center; justify-content: center; text-align: center; gap: 12px; }
 .hub-grid .g-icon { font-size: 84px; }
 
-/* Retro hub: box-art shelves, one centered row of covers per system. Art
-   fades in when /api/art has (or fetches) a cover; until then the system's
-   icon stands in. */
-.rom-grid { display: flex; flex-wrap: wrap; justify-content: center; gap: 18px; }
-.rom-tile { width: 218px; display: flex; flex-direction: column; align-items: stretch; gap: 10px; padding: 12px; min-height: 0; }
-.rom-tile .g-name { font-size: 17px; line-height: 1.25; text-align: center; }
+/* Retro hub: a packed cover grid sized by retroLayout() in tv.js so the
+   whole library fits one screen (tile width and art height come inline).
+   Art fades in when /api/art has (or fetches) a cover; until then a drawn
+   cabinet/cartridge stands in and a badge names the system. */
+.rom-row { display: flex; justify-content: center; gap: 16px; margin-bottom: 16px; }
+.rom-tile { display: flex; flex-direction: column; align-items: stretch; gap: 8px; padding: 12px; min-height: 0; flex: none; }
+.rom-name {
+  font-weight: 800; font-size: 16px; line-height: 1.25; text-align: center;
+  height: 2.5em; overflow: hidden;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
 .rom-art {
-  position: relative; height: 232px; border-radius: 10px; overflow: hidden;
+  position: relative; border-radius: 10px; overflow: hidden;
   background: var(--felt-deep);
   display: flex; align-items: center; justify-content: center;
+}
+.rom-badge {
+  position: absolute; top: 6px; left: 6px; z-index: 1;
+  background: #10121fd9; color: var(--chalk-dim);
+  font-size: 11px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase;
+  padding: 3px 8px; border-radius: 7px;
 }
 .rom-art img { max-width: 100%; max-height: 100%; object-fit: contain; opacity: 0; transition: opacity .2s; }
 .rom-art.haveart img { opacity: 1; }
