@@ -99,8 +99,8 @@ h2 { font-size: 20px; font-weight: 800; }
 .game-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .game-tile {
   position: relative;
-  display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
-  padding: 14px; min-height: 118px;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
+  padding: 18px 16px; min-height: 150px;
   border-radius: 16px; border: none; cursor: pointer;
   background: var(--raised);
   box-shadow: 0 5px 0 var(--edge);
@@ -108,9 +108,9 @@ h2 { font-size: 20px; font-weight: 800; }
   transition: transform .08s, box-shadow .08s;
 }
 .game-tile:active { transform: translateY(4px); box-shadow: 0 1px 0 var(--edge); }
-.game-tile .g-icon { font-size: 34px; line-height: 1; }
-.game-tile .g-name { font-weight: 800; font-size: 16px; }
-.game-tile .g-sub { font-size: 12px; color: var(--chalk-dim); }
+.game-tile .g-icon { font-size: 48px; line-height: 1; }
+.game-tile .g-name { font-weight: 800; font-size: 19px; }
+.game-tile .g-sub { font-size: 13px; color: var(--chalk-dim); }
 .game-tile.cat-cards  { box-shadow: 0 5px 0 var(--cards-edge);  background: linear-gradient(160deg, var(--raised), #3a2333); }
 .game-tile.cat-board  { box-shadow: 0 5px 0 var(--board-edge);  background: linear-gradient(160deg, var(--raised), #1d3a33); }
 .game-tile.cat-arcade { box-shadow: 0 5px 0 var(--arcade-edge); background: linear-gradient(160deg, var(--raised), #322a4d); }
@@ -170,16 +170,22 @@ h2 { font-size: 20px; font-weight: 800; }
 
 /* Your hand on the phone: a vertical cascade (each card overlapping the one
    below, corner rank visible) instead of a sideways-scrolling row — every
-   card readable at a glance. Selected/played picks slide out to the right. */
+   card readable at a glance. Selected/played picks slide out to the right.
+   The overlap adapts to hand size (--n, set by handStrip) so the whole hand
+   always fits in one view without scrolling. */
 .hand {
+  --n: 13;
   display: flex; flex-direction: column; align-items: center;
-  padding: 12px 4px 10px; max-height: 48vh; overflow-y: auto;
+  padding: 12px 4px 10px; max-height: 46vh; overflow-y: auto;
   scrollbar-width: none;
 }
 .hand::-webkit-scrollbar { display: none; }
 .hand .pcard { width: 74px; height: 104px; }
 .hand .pcard .r { font-size: 21px; }
-.hand .pcard + .pcard { margin-top: -76px; } /* 28px strip: a 13-card hand fits unscrolled */
+.hand .pcard + .pcard {
+  /* strip = space budget split across the hand, clamped to stay readable */
+  margin-top: calc(clamp(15px, (min(42vh, 400px) - 104px) / max(var(--n) - 1, 1), 28px) - 104px);
+}
 .hand .pcard.sel { transform: translateX(32px); }
 
 /* ---------------------------------------------------------------- bars */

@@ -55,7 +55,9 @@ export function cardEl(card, opts = {}) {
 }
 
 export function handStrip(cards, { legal = null, selected = [], onTap, size = '' } = {}) {
-  return h('div', { class: 'hand' }, cards.map(c => cardEl(c, {
+  // --n lets the CSS shrink the cascade overlap as the hand grows, so the
+  // whole hand always fits on screen in one view (no scrolling).
+  return h('div', { class: 'hand', style: `--n:${Math.max(cards.length, 1)}` }, cards.map(c => cardEl(c, {
     size,
     sel: selected.includes(c),
     dis: legal && !legal.includes(c),

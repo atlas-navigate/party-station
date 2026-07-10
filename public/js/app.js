@@ -74,14 +74,14 @@ function chooseScreen() {
     wordmark(),
     h('p', { class: 'center dim', style: 'margin:8px 0 20px' }, 'What are we playing?'),
     h('button', {
-      class: 'game-tile cat-cards', style: 'min-height:110px',
+      class: 'game-tile cat-cards', style: 'min-height:130px',
       onclick: () => { hubMode = 'party'; render(); },
     },
       h('span', { class: 'g-icon' }, '🃏'),
       h('span', { class: 'g-name' }, 'Party Games'),
       h('span', { class: 'g-sub' }, 'Card games — phones and controllers')),
     h('button', {
-      class: 'game-tile cat-arcade', style: 'min-height:110px',
+      class: 'game-tile cat-arcade', style: 'min-height:130px',
       onclick: () => { hubMode = 'retro'; render(); },
     },
       h('span', { class: 'g-icon' }, '🕹️'),
