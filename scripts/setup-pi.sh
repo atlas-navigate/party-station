@@ -1,28 +1,59 @@
 #!/usr/bin/env bash
-# Party Station — one-shot Raspberry Pi setup.
+# Party Station — one-shot setup for a Raspberry Pi or any Linux box.
 #
 #   curl -fsSL https://raw.githubusercontent.com/atlas-navigate/party-station/main/scripts/setup-pi.sh | sudo bash
 #
 # What it does:
 #   1. Sets the hostname to "party-station" so the app lives at http://party-station.local
-#   2. Ensures avahi (mDNS), git, and Node.js 20+ are installed
-#   3. Clones the app to /opt/party-station and installs dependencies
+#   2. Ensures avahi (mDNS), git, and Node.js 18+ are installed
+#      (supports apt, dnf, yum, pacman, and zypper based distros)
+#   3. Clones the app to /opt/party-station and installs dependencies — always
+#      the latest GitHub main, the exact version a live station runs (stations
+#      auto-update from main)
 #   4. Installs + starts a systemd service on port 80 (auto-restarts, applies updates)
-#   5. Makes the Pi a console: boots straight into a Chromium kiosk showing the
-#      TV view on the HDMI screen (desktop image required; skip with SETUP_KIOSK=0)
-#   6. Installs RetroArch + emulator cores via RetroPie for the retro Cabinet
-#      (real Pi only; skip with SETUP_RETROPIE=0; prebuilt emulators need
-#      Raspberry Pi OS 12 "Bookworm" or older — on newer OSes the cores are
-#      skipped unless RETROPIE_FROM_SOURCE=1; ROMs are never included)
+#   5. Makes the box a console: boots straight into a Chromium kiosk showing the
+#      TV view on the attached screen (desktop session required; skip with SETUP_KIOSK=0)
+#   6. On a real Raspberry Pi only: installs RetroArch + emulator cores via
+#      RetroPie for the retro Cabinet (skip with SETUP_RETROPIE=0; prebuilt
+#      emulators need Raspberry Pi OS 12 "Bookworm" or older — on newer OSes
+#      the cores are skipped unless RETROPIE_FROM_SOURCE=1; ROMs are never
+#      included)
 set -euo pipefail
 
 # This script usually runs as `curl … | sudo bash` — nothing may ever stop to
-# ask a question, or the install looks hung. Keep apt and git non-interactive.
+# ask a question, or the install looks hung. Keep package tools and git
+# non-interactive.
 export DEBIAN_FRONTEND=noninteractive
 export GIT_TERMINAL_PROMPT=0
-apt_install() {
-  apt-get install -y -qq \
-    -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold "$@"
+
+# ── Package manager abstraction: apt (Debian/Ubuntu/Raspberry Pi OS),
+#    dnf/yum (Fedora/RHEL), pacman (Arch), zypper (openSUSE). ──
+PKG=""
+for pm in apt-get dnf yum pacman zypper; do
+  command -v "$pm" >/dev/null 2>&1 && { PKG="$pm"; break; }
+done
+if [ -z "$PKG" ]; then
+  echo "!! No supported package manager found (apt-get, dnf, yum, pacman, zypper)."
+  exit 1
+fi
+
+pkg_refresh() {
+  case "$PKG" in
+    apt-get) apt-get update -qq ;;
+    pacman)  pacman -Sy --noconfirm >/dev/null ;;
+    zypper)  zypper --non-interactive refresh >/dev/null 2>&1 || true ;;
+    *)       : ;;   # dnf/yum refresh metadata on demand
+  esac
+}
+
+pkg_install() {
+  case "$PKG" in
+    apt-get) apt-get install -y -qq \
+      -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold "$@" ;;
+    dnf|yum) "$PKG" install -y -q "$@" ;;
+    pacman)  pacman -S --noconfirm --needed "$@" ;;
+    zypper)  zypper --non-interactive install "$@" ;;
+  esac
 }
 
 REPO="https://github.com/atlas-navigate/party-station.git"
@@ -37,6 +68,11 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
+if ! command -v systemctl >/dev/null 2>&1; then
+  echo "!! This installer needs systemd (it runs Party Station as a service) — not found."
+  exit 1
+fi
+
 if ! id -u "$RUN_USER" >/dev/null 2>&1; then
   echo "User \"$RUN_USER\" doesn't exist — the console needs a normal account to run as."
   echo "Run this with sudo from your regular user, or pick one: RUN_USER=<user>"
@@ -44,13 +80,23 @@ if ! id -u "$RUN_USER" >/dev/null 2>&1; then
 fi
 
 echo "==> Installing packages (git, avahi, curl)…"
-apt-get update -qq
-apt_install git avahi-daemon curl ca-certificates >/dev/null
+pkg_refresh
+case "$PKG" in
+  apt-get) pkg_install git avahi-daemon curl ca-certificates >/dev/null ;;
+  *)       pkg_install git avahi curl ca-certificates >/dev/null ;;
+esac
+# Fedora/RHEL resolve .local names through nss-mdns; harmless if unavailable.
+case "$PKG" in dnf|yum) pkg_install nss-mdns >/dev/null 2>&1 || true ;; esac
 
 echo "==> Setting hostname to ${HOSTNAME_WANTED} (→ http://${HOSTNAME_WANTED}.local)…"
 CURRENT_HOST="$(hostname)"
 if [ "$CURRENT_HOST" != "$HOSTNAME_WANTED" ]; then
-  hostnamectl set-hostname "$HOSTNAME_WANTED"
+  if command -v hostnamectl >/dev/null 2>&1; then
+    hostnamectl set-hostname "$HOSTNAME_WANTED"
+  else
+    echo "$HOSTNAME_WANTED" > /etc/hostname
+    hostname "$HOSTNAME_WANTED"
+  fi
   if grep -q "127.0.1.1" /etc/hosts; then
     sed -i "s/^127\.0\.1\.1.*/127.0.1.1\t${HOSTNAME_WANTED}/" /etc/hosts
   else
@@ -66,16 +112,43 @@ if command -v node >/dev/null 2>&1; then
   [ "$MAJOR" -ge 18 ] && NEED_NODE=0
 fi
 if [ "$NEED_NODE" = 1 ]; then
-  echo "    Installing Node.js 20 from NodeSource…"
-  if ! curl -fsSL https://deb.nodesource.com/setup_20.x | bash - >/dev/null 2>&1; then
-    echo "    NodeSource doesn't cover this OS/arch — falling back to the distro's nodejs…"
-  fi
-  apt_install nodejs >/dev/null
+  case "$PKG" in
+    apt-get)
+      echo "    Installing Node.js 20 from NodeSource…"
+      if ! curl -fsSL https://deb.nodesource.com/setup_20.x | bash - >/dev/null 2>&1; then
+        echo "    NodeSource doesn't cover this OS/arch — falling back to the distro's nodejs…"
+      fi
+      pkg_install nodejs >/dev/null
+      ;;
+    dnf|yum)
+      echo "    Installing Node.js 20 from NodeSource…"
+      if ! curl -fsSL https://rpm.nodesource.com/setup_20.x | bash - >/dev/null 2>&1; then
+        echo "    NodeSource doesn't cover this OS/arch — falling back to the distro's nodejs…"
+      fi
+      pkg_install nodejs >/dev/null
+      ;;
+    pacman)
+      echo "    Installing Node.js from the Arch repos…"
+      pkg_install nodejs npm >/dev/null
+      ;;
+    zypper)
+      echo "    Installing Node.js from the openSUSE repos…"
+      pkg_install nodejs22 nodejs22-npm >/dev/null 2>&1 \
+        || pkg_install nodejs20 nodejs20-npm >/dev/null 2>&1 \
+        || pkg_install nodejs npm >/dev/null
+      ;;
+  esac
   if ! command -v node >/dev/null 2>&1 \
     || [ "$(node -e 'console.log(process.versions.node.split(".")[0])')" -lt 18 ]; then
     echo "!! Couldn't get Node.js 18+ onto this system — install it manually, then re-run."
     exit 1
   fi
+fi
+# Some distros ship npm separately from nodejs.
+command -v npm >/dev/null 2>&1 || pkg_install npm >/dev/null 2>&1 || true
+if ! command -v npm >/dev/null 2>&1; then
+  echo "!! Node.js is present but npm is missing — install npm, then re-run."
+  exit 1
 fi
 echo "    Node $(node --version)"
 
@@ -98,30 +171,54 @@ systemctl enable --now party-station
 sleep 2
 systemctl --no-pager --lines=0 status party-station || true
 
-# ── TV kiosk: on by default — the Pi is a console. Skip with SETUP_KIOSK=0. ──
+# Some distros (Fedora, openSUSE) ship an active firewall that would keep
+# phones from reaching the station — open http and mDNS if one is running.
+if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
+  echo "==> Opening http + mDNS in firewalld…"
+  firewall-cmd --permanent --add-service=http >/dev/null 2>&1 || true
+  firewall-cmd --permanent --add-service=mdns >/dev/null 2>&1 || true
+  firewall-cmd --reload >/dev/null 2>&1 || true
+elif command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "^Status: active"; then
+  echo "==> Opening http + mDNS in ufw…"
+  ufw allow 80/tcp >/dev/null 2>&1 || true
+  ufw allow 5353/udp >/dev/null 2>&1 || true
+fi
+
+# ── TV kiosk: on by default — the box is a console. Skip with SETUP_KIOSK=0. ──
 if [ "${SETUP_KIOSK:-1}" != "0" ]; then
-  echo "==> Setting up the TV kiosk (HDMI boots straight into the console)…"
+  echo "==> Setting up the TV kiosk (the screen boots straight into the console)…"
   HAS_DESKTOP=0
-  for bin in labwc wayfire startlxde-pi lxsession lightdm; do
+  for bin in labwc wayfire startlxde-pi lxsession lightdm gdm gdm3 sddm \
+             gnome-session startplasma-wayland startplasma-x11 xfce4-session \
+             cinnamon-session mate-session sway; do
     command -v "$bin" >/dev/null 2>&1 && HAS_DESKTOP=1 && break
   done
   if [ "$HAS_DESKTOP" = 0 ]; then
-    echo "    No desktop session found (Raspberry Pi OS Lite?) — kiosk skipped."
-    echo "    Use the desktop image to drive the TV from the Pi, or open"
+    echo "    No desktop session found (Lite/server install?) — kiosk skipped."
+    echo "    Use a desktop image to drive the TV from this box, or open"
     echo "    http://party-station.local/tv on a smart TV's browser."
   else
     KIOSK_BROWSER=""
     command -v chromium-browser >/dev/null 2>&1 && KIOSK_BROWSER="chromium-browser"
     [ -z "$KIOSK_BROWSER" ] && command -v chromium >/dev/null 2>&1 && KIOSK_BROWSER="chromium"
     if [ -z "$KIOSK_BROWSER" ]; then
-      apt_install chromium-browser >/dev/null 2>&1 || apt_install chromium >/dev/null 2>&1 || true
+      pkg_install chromium >/dev/null 2>&1 || pkg_install chromium-browser >/dev/null 2>&1 || true
       command -v chromium-browser >/dev/null 2>&1 && KIOSK_BROWSER="chromium-browser"
       [ -z "$KIOSK_BROWSER" ] && command -v chromium >/dev/null 2>&1 && KIOSK_BROWSER="chromium"
     fi
     if [ -n "$KIOSK_BROWSER" ]; then
       # Emoji glyphs for the TV UI, and pointer tools kiosk.sh uses to park
       # the mouse cursor off-screen (wlrctl on Wayland, xdotool on X11).
-      apt_install fonts-noto-color-emoji wlrctl xdotool >/dev/null 2>&1 || true
+      # Installed one at a time: any of them may be missing on a given distro.
+      case "$PKG" in
+        apt-get) EMOJI_PKGS="fonts-noto-color-emoji" ;;
+        dnf|yum) EMOJI_PKGS="google-noto-color-emoji-fonts google-noto-emoji-color-fonts" ;;
+        pacman)  EMOJI_PKGS="noto-fonts-emoji" ;;
+        zypper)  EMOJI_PKGS="noto-coloremoji-fonts" ;;
+      esac
+      for p in $EMOJI_PKGS wlrctl xdotool; do
+        pkg_install "$p" >/dev/null 2>&1 || true
+      done
 
       # Console behavior: log straight into the desktop, never blank the TV.
       if command -v raspi-config >/dev/null 2>&1; then
@@ -142,8 +239,9 @@ exec "$KIOSK_CMD" "\$@"
 EOF
       chmod +x /usr/local/bin/party-station-kiosk
 
-      # Hook every session type Raspberry Pi OS ships; kiosk.sh holds a lock
-      # so at most one instance runs even if two mechanisms fire.
+      # Hook every session type the box might have (XDG autostart covers
+      # GNOME, KDE, LXDE, XFCE, …); kiosk.sh holds a lock so at most one
+      # instance runs even if two mechanisms fire.
       AUTOSTART_DIR="$HOME_DIR/.config/autostart"
       mkdir -p "$AUTOSTART_DIR"
       cat > "$AUTOSTART_DIR/party-station-kiosk.desktop" <<EOF
@@ -208,7 +306,7 @@ EOF
       echo "    No prebuilt emulators for this OS — compiling from source."
       echo "    This takes HOURS on a Pi; leave it running (build output streams below)."
     fi
-    apt_install dialog unzip >/dev/null 2>&1 || true
+    pkg_install dialog unzip >/dev/null 2>&1 || true
     RP_SETUP="$HOME_DIR/RetroPie-Setup"
     if [ ! -d "$RP_SETUP/.git" ]; then
       sudo -u "$RUN_USER" env GIT_TERMINAL_PROMPT=0 git clone --depth=1 https://github.com/RetroPie/RetroPie-Setup.git "$RP_SETUP"
@@ -266,16 +364,18 @@ EOF
     echo "    (or scp them into ~/RetroPie/roms/incoming — they sort themselves)."
   fi
 elif [ "${SETUP_RETROPIE:-1}" != "0" ]; then
-  echo "==> Not a Raspberry Pi — skipping RetroArch/RetroPie setup."
+  echo "==> Not a Raspberry Pi — skipping RetroArch/RetroPie setup (the party"
+  echo "    games all work; only the retro Cabinet needs a Pi)."
 fi
 
 IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+[ -n "$IP" ] || IP="$(ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1)"
 cat <<EOF
 
 ✅ Party Station is up!
 
    Phones:      http://party-station.local   (or http://${IP})
-   Big screen:  plug the Pi into the TV — it boots straight into the console
+   Big screen:  plug this box into the TV — it boots straight into the console
                 (or open http://party-station.local/tv on a smart TV's browser)
    Retro ROMs:  upload at http://party-station.local/roms, or scp files into
                 ~/RetroPie/roms/incoming — they sort into the right folder
