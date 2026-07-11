@@ -91,11 +91,12 @@ case "$PKG" in dnf|yum) pkg_install nss-mdns >/dev/null 2>&1 || true ;; esac
 echo "==> Setting hostname to ${HOSTNAME_WANTED} (→ http://${HOSTNAME_WANTED}.local)…"
 CURRENT_HOST="$(hostname)"
 if [ "$CURRENT_HOST" != "$HOSTNAME_WANTED" ]; then
-  if command -v hostnamectl >/dev/null 2>&1; then
-    hostnamectl set-hostname "$HOSTNAME_WANTED"
-  else
+  # hostnamectl can be present but refuse (containers, WSL) — fall back to
+  # writing /etc/hostname directly rather than aborting the install.
+  if ! { command -v hostnamectl >/dev/null 2>&1 \
+         && hostnamectl set-hostname "$HOSTNAME_WANTED" 2>/dev/null; }; then
     echo "$HOSTNAME_WANTED" > /etc/hostname
-    hostname "$HOSTNAME_WANTED"
+    hostname "$HOSTNAME_WANTED" 2>/dev/null || true
   fi
   if grep -q "127.0.1.1" /etc/hosts; then
     sed -i "s/^127\.0\.1\.1.*/127.0.1.1\t${HOSTNAME_WANTED}/" /etc/hosts

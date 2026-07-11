@@ -64,7 +64,7 @@ if you want the retro Cabinet, see the note below), get it on your network,
 then:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/atlas-navigate/party-station/main/scripts/setup-pi.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/atlas-navigate/party-station/main/install.sh | sudo bash
 ```
 
 That one command sets up the whole console, no menus to click through:
@@ -94,7 +94,7 @@ Opt out of pieces with env vars — e.g. the Pi is also your desktop machine,
 or you don't want emulators:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/atlas-navigate/party-station/main/scripts/setup-pi.sh | sudo SETUP_KIOSK=0 SETUP_RETROPIE=0 bash
+curl -fsSL https://raw.githubusercontent.com/atlas-navigate/party-station/main/install.sh | sudo SETUP_KIOSK=0 SETUP_RETROPIE=0 bash
 ```
 
 On Raspberry Pi OS **Lite** there's no browser to run, so the kiosk is
