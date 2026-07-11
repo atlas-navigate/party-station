@@ -320,7 +320,9 @@ function scheduleBots() {
   for (const seatIdx of g.awaiting()) {
     const seat = session.seats[seatIdx];
     if (!seat || !seat.bot || session.botTimers.has(seatIdx)) continue;
-    const delay = 650 + Math.random() * 850;
+    // BOT_DELAY_MS: test hook (e2e) — full games against bots at human pace
+    // take minutes; never set in production.
+    const delay = Number(process.env.BOT_DELAY_MS) || 650 + Math.random() * 850;
     session.botTimers.set(seatIdx, setTimeout(() => {
       if (!session || session.game !== g) return;
       session.botTimers.delete(seatIdx);

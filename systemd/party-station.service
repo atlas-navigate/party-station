@@ -1,7 +1,9 @@
 [Unit]
 Description=Party Station game server
-After=network-online.target
-Wants=network-online.target
+# network.target, not network-online.target: the server binds 0.0.0.0 and
+# needs no address yet, and waiting for DHCP/Wi-Fi held the TV kiosk back
+# 10-30s on every boot.
+After=network.target
 
 [Service]
 Type=simple

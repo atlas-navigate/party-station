@@ -224,6 +224,20 @@ if [ "${SETUP_KIOSK:-1}" != "0" ]; then
       if command -v raspi-config >/dev/null 2>&1; then
         raspi-config nonint do_boot_behaviour B4 >/dev/null 2>&1 || true
         raspi-config nonint do_blanking 1 >/dev/null 2>&1 || true
+        raspi-config nonint do_boot_splash 1 >/dev/null 2>&1 || true
+      fi
+
+      # Faster Pi boot to the console: skip the firmware rainbow splash and
+      # its default 1s boot delay. (Pi only; idempotent.)
+      if grep -qi "raspberry pi" /proc/device-tree/model 2>/dev/null; then
+        BOOTCFG=""
+        for f in /boot/firmware/config.txt /boot/config.txt; do
+          [ -f "$f" ] && { BOOTCFG="$f"; break; }
+        done
+        if [ -n "$BOOTCFG" ]; then
+          grep -q '^disable_splash=' "$BOOTCFG" || echo 'disable_splash=1' >> "$BOOTCFG"
+          grep -q '^boot_delay=' "$BOOTCFG" || echo 'boot_delay=0' >> "$BOOTCFG"
+        fi
       fi
 
       KIOSK_CMD="$APP_DIR/scripts/kiosk.sh"

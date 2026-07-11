@@ -1,13 +1,16 @@
 // End-to-end smoke test over a real WebSocket connection:
 //   two phones + a TV join, play Crazy 8s to completion, and exercise
 //   save & resume plus the controller (pad) player flow.
-// Usage: PORT=8090 node scripts/e2e.js   (expects the server already running)
+// Usage: PORT=8090 node scripts/e2e.js   (expects the server already running;
+// start it with BOT_DELAY_MS=50 for a fast run — at the default human-feeling
+// bot pace the pad game alone averages ~45s, which is also why the deadline
+// below is generous: game length is random and long games are legitimate).
 import WebSocket from 'ws';
 
 const PORT = process.env.PORT || 8090;
 const URL = `ws://127.0.0.1:${PORT}/ws`;
 
-const deadline = setTimeout(() => { console.error('✗ e2e timed out'); process.exit(1); }, 60000);
+const deadline = setTimeout(() => { console.error('✗ e2e timed out'); process.exit(1); }, 180000);
 
 function client(role, name) {
   const ws = new WebSocket(URL);
