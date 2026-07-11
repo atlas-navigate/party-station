@@ -114,6 +114,31 @@ export function tv2d(render, { peekCards } = {}) {
   };
 }
 
+// Oval card table with the players arranged around the rim — seat 0 at the
+// bottom, seat i+1 clockwise from seat i. Clockwise matters: it puts seat
+// i+1 on seat i's LEFT (players face the middle), which is where server card
+// games send passes and turns, so "pass left" visibly goes to your left.
+// seatEl(seat, i) builds each player's rim panel; inner(i) optionally places
+// content (a played card, …) between that seat and the middle; center fills
+// the felt.
+export function tableEl(seats, { seatEl, inner, center } = {}) {
+  const n = seats.length;
+  const spot = (i, r) => {
+    const th = (i / n) * 2 * Math.PI;
+    return `position:absolute;left:${(50 - r * Math.sin(th)).toFixed(1)}%;`
+      + `top:${(50 + r * Math.cos(th)).toFixed(1)}%;transform:translate(-50%,-50%)`;
+  };
+  return h('div', { class: 'tv-table' },
+    h('div', { class: 'felt' }),
+    center && h('div', { class: 'tv-table-center' }, center),
+    inner ? seats.map((_, i) => {
+      const c = inner(i);
+      return c && h('div', { style: spot(i, 28) + ';z-index:2' }, c);
+    }) : null,
+    seats.map((s, i) => h('div', { class: 'tv-seat', style: spot(i, 48) }, seatEl(s, i))),
+  );
+}
+
 export function chipEl(seat, opts = {}) {
   const initial = (seat.name || '?').trim()[0]?.toUpperCase() || '?';
   return h('div', {

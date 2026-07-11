@@ -1,4 +1,4 @@
-import { h, mount, handStrip, tv2d } from '../ui.js';
+import { h, mount, handStrip, tableEl, tv2d } from '../ui.js';
 
 const RANK_WORD = { A: 'Aces', K: 'Kings', Q: 'Queens', J: 'Jacks', T: '10s' };
 const rankWord = r => RANK_WORD[r] || r + 's';
@@ -48,24 +48,23 @@ export const player = {
 
 export const tv = tv2d((el, ctx) => {
   const { pub, seats } = ctx;
-  mount(el,
-    h('div', { style: 'width:100%;max-width:1100px' },
-      h('div', { class: 'center', style: 'margin-bottom:24px' },
-        h('div', { style: 'font-size:26px' }, `🌊 Pond: ${pub.deckCount} cards`)),
-      h('div', { class: 'row wrap', style: 'justify-content:center;gap:18px' },
-        seats.map((s, i) => h('div', {
-          class: 'banner', style: 'min-width:220px' + (pub.turn === i ? ';box-shadow:0 4px 0 var(--marquee-edge),0 0 24px #ffb52e55' : ''),
-        },
-          h('div', { class: 'spread' },
-            h('span', {}, (s.bot ? '🤖 ' : '') + s.name),
-            h('span', { class: 'numpill' }, `${pub.handCounts[i]} 🂠`)),
-          h('div', { style: 'font-size:24px;margin-top:6px;min-height:32px' },
-            pub.books[i].length ? pub.books[i].map(r => '📕').join('') : h('span', { class: 'dim', style: 'font-size:15px' }, 'no books yet'),
-            h('span', { class: 'dim', style: 'font-size:15px' }, pub.books[i].length ? `  ${pub.books[i].map(rankWord).join(', ')}` : '')),
-        ))),
-      h('div', { class: 'log center', style: 'margin-top:26px;font-size:19px' },
-        pub.log.map(e => h('div', {}, logLine(e, seats)))),
-    ));
+  mount(el, tableEl(seats, {
+    center: h('div', {},
+      h('div', { style: 'font-size:26px' }, `🌊 Pond: ${pub.deckCount} cards`),
+      h('div', { class: 'log center', style: 'margin-top:10px;font-size:18px' },
+        pub.log.slice(-3).map(e => h('div', {}, logLine(e, seats)))),
+    ),
+    seatEl: (s, i) => h('div', {
+      class: 'banner center', style: 'min-width:180px'
+        + (pub.turn === i ? ';box-shadow:0 4px 0 var(--marquee-edge),0 0 24px #ffb52e55' : ''),
+    },
+      h('div', {}, (s.bot ? '🤖 ' : '') + s.name, ' ',
+        h('span', { class: 'numpill' }, `${pub.handCounts[i]} cards`)),
+      h('div', { style: 'font-size:20px;margin-top:4px;min-height:26px' },
+        pub.books[i].length ? pub.books[i].map(() => '📕').join('') : h('span', { class: 'dim', style: 'font-size:14px' }, 'no books yet'),
+        h('span', { class: 'dim', style: 'font-size:14px' }, pub.books[i].length ? ` ${pub.books[i].map(rankWord).join(', ')}` : '')),
+    ),
+  }));
 }, { peekCards: (ctx, seat) => ctx.privOf(seat)?.hand });
 
 export function padChoices({ pub, priv, seat, seats }, stage) {

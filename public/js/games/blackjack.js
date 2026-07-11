@@ -1,4 +1,4 @@
-import { h, mount, cardEl, tv2d } from '../ui.js';
+import { h, mount, cardEl, tableEl, tv2d } from '../ui.js';
 
 const CHIP_VALUES = [10, 25, 50, 100];
 
@@ -67,34 +67,32 @@ export const player = {
 
 export const tv = tv2d((el, ctx) => {
   const { pub, seats } = ctx;
-  mount(el,
-    h('div', { style: 'width:100%;max-width:1200px' },
-      h('div', { class: 'center', style: 'margin-bottom:26px' },
-        h('div', { class: 'eyebrow', style: 'font-size:15px;margin-bottom:8px' }, 'Dealer'),
-        h('div', { class: 'row', style: 'justify-content:center' },
-          pub.dealer.map(c => cardEl(c, { size: 'lg', button: false }))),
-        pub.dealerValue != null && h('div', { style: 'font-size:26px;font-weight:800;margin-top:6px' },
-          pub.dealerValue, pub.dealerValue > 21 ? ' — BUST 💥' : ''),
-        pub.phase === 'bet' && h('div', { class: 'banner hot', style: 'display:inline-block;margin-top:10px' }, 'Place your bets…'),
-      ),
-      h('div', { class: 'row wrap', style: 'justify-content:center;gap:16px' },
-        seats.map((s, i) => {
-          const r = pub.phase === 'payout' ? pub.results[i] : null;
-          return h('div', {
-            class: 'banner center',
-            style: 'min-width:190px' + (pub.turn === i ? ';box-shadow:0 4px 0 var(--marquee-edge),0 0 24px #ffb52e66' : '')
-              + (pub.sittingOut[i] ? ';opacity:.4' : ''),
-          },
-            h('div', {}, (s.bot ? '🤖 ' : '') + s.name),
-            h('div', { class: 'row', style: 'justify-content:center;margin:8px 0;min-height:60px' },
-              (pub.hands[i] || []).map(c => cardEl(c, { size: 'sm', button: false }))),
-            h('div', { class: 'dim', style: 'font-size:16px' },
-              pub.values[i] != null ? `${pub.values[i]} · ` : '', `bet ${pub.bets[i] || '—'} · 🪙 ${pub.bank[i]}`),
-            r && h('div', { style: `font-weight:800;margin-top:4px;color:${r.delta > 0 ? 'var(--marquee)' : r.delta < 0 ? 'var(--danger)' : 'var(--chalk-dim)'}` },
-              `${r.label} ${r.delta > 0 ? '+' : ''}${r.delta}`),
-          );
-        })),
-    ));
+  mount(el, tableEl(seats, {
+    center: h('div', {},
+      h('div', { class: 'eyebrow', style: 'font-size:15px' }, 'Dealer'),
+      h('div', { class: 'row', style: 'justify-content:center;margin-top:6px' },
+        pub.dealer.map(c => cardEl(c, { size: 'lg', button: false }))),
+      pub.dealerValue != null && h('div', { style: 'font-size:26px;font-weight:800;margin-top:6px' },
+        pub.dealerValue, pub.dealerValue > 21 ? ' — BUST 💥' : ''),
+      pub.phase === 'bet' && h('div', { class: 'banner hot', style: 'margin-top:10px' }, 'Place your bets…'),
+    ),
+    seatEl: (s, i) => {
+      const r = pub.phase === 'payout' ? pub.results[i] : null;
+      return h('div', {
+        class: 'banner center',
+        style: 'min-width:170px' + (pub.turn === i ? ';box-shadow:0 4px 0 var(--marquee-edge),0 0 24px #ffb52e66' : '')
+          + (pub.sittingOut[i] ? ';opacity:.4' : ''),
+      },
+        h('div', {}, (s.bot ? '🤖 ' : '') + s.name),
+        h('div', { class: 'row', style: 'justify-content:center;margin:6px 0;min-height:56px' },
+          (pub.hands[i] || []).map(c => cardEl(c, { size: 'sm', button: false }))),
+        h('div', { class: 'dim', style: 'font-size:16px' },
+          pub.values[i] != null ? `${pub.values[i]} · ` : '', `bet ${pub.bets[i] || '—'} · 🪙 ${pub.bank[i]}`),
+        r && h('div', { style: `font-weight:800;margin-top:4px;color:${r.delta > 0 ? 'var(--marquee)' : r.delta < 0 ? 'var(--danger)' : 'var(--chalk-dim)'}` },
+          `${r.label} ${r.delta > 0 ? '+' : ''}${r.delta}`),
+      );
+    },
+  }));
 });
 
 export function padChoices({ pub, priv, seat }) {

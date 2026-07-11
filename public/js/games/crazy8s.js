@@ -1,4 +1,4 @@
-import { h, mount, cardEl, handStrip, chipEl, sheet, tv2d } from '../ui.js';
+import { h, mount, cardEl, handStrip, chipEl, sheet, tableEl, tv2d } from '../ui.js';
 
 const SUITS = [['s', '♠'], ['h', '♥'], ['d', '♦'], ['c', '♣']];
 const GLYPH = Object.fromEntries(SUITS);
@@ -48,8 +48,8 @@ export const player = {
 
 export const tv = tv2d((el, ctx) => {
   const { pub, seats } = ctx;
-  mount(el,
-    h('div', { class: 'center' },
+  mount(el, tableEl(seats, {
+    center: h('div', {},
       h('div', { class: 'row', style: 'justify-content:center;gap:26px;align-items:center' },
         h('div', {}, cardEl('back', { size: 'lg' }), h('div', { class: 'dim center', style: 'font-size:16px;margin-top:6px' }, `${pub.deckCount} left`)),
         cardEl(pub.top, { size: 'lg', button: false }),
@@ -57,12 +57,12 @@ export const tv = tv2d((el, ctx) => {
       ),
       pub.roundsTotal > 1 && h('div', { class: 'dim', style: 'margin-top:10px;font-size:20px' },
         `Round ${pub.round} of ${pub.roundsTotal}`),
-      h('div', { class: 'tv-seats', style: 'margin-top:30px' },
-        seats.map((s, i) => chipEl(s, {
-          turn: pub.turn === i && pub.phase === 'play',
-          extra: `· ${pub.handCounts[i]} card${pub.handCounts[i] === 1 ? '❗' : 's'}${pub.roundsTotal > 1 ? ' · ' + pub.wins[i] + 'w' : ''}`,
-        }))),
-    ));
+    ),
+    seatEl: (s, i) => chipEl(s, {
+      turn: pub.turn === i && pub.phase === 'play',
+      extra: `· ${pub.handCounts[i]} card${pub.handCounts[i] === 1 ? '❗' : 's'}${pub.roundsTotal > 1 ? ' · ' + pub.wins[i] + 'w' : ''}`,
+    }),
+  }));
 }, { peekCards: (ctx, seat) => ctx.privOf(seat)?.hand });
 
 export function padChoices({ pub, priv, seat }, stage) {

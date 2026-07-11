@@ -1,4 +1,4 @@
-import { h, mount, cardEl, sheet, tv2d } from '../ui.js';
+import { h, mount, cardEl, sheet, tableEl, tv2d } from '../ui.js';
 
 const STREETS = ['Pre-flop', 'Flop', 'Turn', 'River'];
 
@@ -76,40 +76,38 @@ export const tv = tv2d((el, ctx) => {
   const { pub, seats } = ctx;
   const r = pub.phase === 'payout' ? pub.results : null;
   const board = r ? r.board : pub.board;
-  mount(el,
-    h('div', { style: 'width:100%;max-width:1200px' },
-      h('div', { class: 'center', style: 'margin-bottom:20px' },
-        h('div', { class: 'eyebrow', style: 'font-size:15px' },
-          pub.phase === 'payout' ? 'Showdown' : STREETS[pub.street] || ''),
-        h('div', { class: 'row', style: 'justify-content:center;margin-top:10px;min-height:110px' },
-          [0, 1, 2, 3, 4].map(i => board[i] ? cardEl(board[i], { size: 'lg', button: false }) : cardEl('back', { size: 'lg' }))),
-        h('div', { style: 'font-size:30px;font-weight:800;margin-top:10px' }, `Pot ${pub.pot} 🪙`),
-      ),
-      h('div', { class: 'row wrap', style: 'justify-content:center;gap:14px' },
-        seats.map((s, i) => {
-          const shown = r?.shown?.[i];
-          const winner = r?.pots?.some(p => p.winners.includes(i));
-          return h('div', {
-            class: 'banner center',
-            style: 'min-width:180px'
-              + (pub.turn === i ? ';box-shadow:0 4px 0 var(--marquee-edge),0 0 24px #ffb52e66' : '')
-              + (pub.busted[i] || (!pub.inHand[i] && pub.phase === 'hand') ? ';opacity:.4' : '')
-              + (winner ? ';background:#3a3145' : ''),
-          },
-            h('div', {}, (s.bot ? '🤖 ' : '') + s.name, pub.button === i ? ' 🔘' : ''),
-            shown
-              ? h('div', { class: 'row', style: 'justify-content:center;margin:6px 0' },
-                shown.cards.map(c => cardEl(c, { size: 'sm', button: false })))
-              : pub.inHand[i] && h('div', { class: 'row', style: 'justify-content:center;margin:6px 0' },
-                [cardEl('back', { size: 'sm' }), cardEl('back', { size: 'sm' })]),
-            h('div', { class: 'dim', style: 'font-size:16px' },
-              `🪙 ${pub.stacks[i]}`, pub.committed[i] ? ` · bet ${pub.committed[i]}` : '', pub.allin[i] ? ' · ALL IN' : ''),
-            shown && h('div', { style: 'font-size:14px;color:var(--marquee)' }, shown.name),
-            winner && h('div', { style: 'font-weight:800;color:var(--marquee)' },
-              `+${r.pots.filter(p => p.winners.includes(i)).reduce((a, p) => a + Math.floor(p.amount / p.winners.length), 0)} 🏆`),
-          );
-        })),
-    ));
+  mount(el, tableEl(seats, {
+    center: h('div', {},
+      h('div', { class: 'eyebrow', style: 'font-size:15px' },
+        pub.phase === 'payout' ? 'Showdown' : STREETS[pub.street] || ''),
+      h('div', { class: 'row', style: 'justify-content:center;margin-top:8px;min-height:110px' },
+        [0, 1, 2, 3, 4].map(i => board[i] ? cardEl(board[i], { size: 'lg', button: false }) : cardEl('back', { size: 'lg' }))),
+      h('div', { style: 'font-size:30px;font-weight:800;margin-top:8px' }, `Pot ${pub.pot} 🪙`),
+    ),
+    seatEl: (s, i) => {
+      const shown = r?.shown?.[i];
+      const winner = r?.pots?.some(p => p.winners.includes(i));
+      return h('div', {
+        class: 'banner center',
+        style: 'min-width:160px'
+          + (pub.turn === i ? ';box-shadow:0 4px 0 var(--marquee-edge),0 0 24px #ffb52e66' : '')
+          + (pub.busted[i] || (!pub.inHand[i] && pub.phase === 'hand') ? ';opacity:.4' : '')
+          + (winner ? ';background:#3a3145' : ''),
+      },
+        h('div', {}, (s.bot ? '🤖 ' : '') + s.name, pub.button === i ? ' 🔘' : ''),
+        shown
+          ? h('div', { class: 'row', style: 'justify-content:center;margin:6px 0' },
+            shown.cards.map(c => cardEl(c, { size: 'sm', button: false })))
+          : pub.inHand[i] && h('div', { class: 'row', style: 'justify-content:center;margin:6px 0' },
+            [cardEl('back', { size: 'sm' }), cardEl('back', { size: 'sm' })]),
+        h('div', { class: 'dim', style: 'font-size:16px' },
+          `🪙 ${pub.stacks[i]}`, pub.committed[i] ? ` · bet ${pub.committed[i]}` : '', pub.allin[i] ? ' · ALL IN' : ''),
+        shown && h('div', { style: 'font-size:14px;color:var(--marquee)' }, shown.name),
+        winner && h('div', { style: 'font-weight:800;color:var(--marquee)' },
+          `+${r.pots.filter(p => p.winners.includes(i)).reduce((a, p) => a + Math.floor(p.amount / p.winners.length), 0)} 🏆`),
+      );
+    },
+  }));
 }, { peekCards: (ctx, seat) => ctx.privOf(seat)?.hole });
 
 export function padChoices({ pub, priv, seat }) {

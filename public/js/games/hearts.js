@@ -1,11 +1,16 @@
-import { h, mount, cardEl, handStrip, chipEl, tv2d } from '../ui.js';
+import { h, mount, cardEl, handStrip, chipEl, tableEl, tv2d } from '../ui.js';
 
+// The server hands seat i's pass to seat (i + dir) % n, i.e. dir seats to the
+// LEFT; dir past the halfway point reads more naturally as seats to the right.
 const dirLabel = (dir, n) =>
   dir === 0 ? 'No passing this round'
     : dir === 1 ? 'Pass 3 cards LEFT ⬅️'
       : dir === n - 1 ? 'Pass 3 cards RIGHT ➡️'
-        : n === 4 && dir === 2 ? 'Pass 3 cards ACROSS ⬆️'
-          : `Pass 3 cards ${dir} seats LEFT ⬅️`;
+        : n % 2 === 0 && dir === n / 2 ? 'Pass 3 cards ACROSS ⬆️'
+          : dir < n / 2 ? `Pass 3 cards ${dir} seats LEFT ⬅️`
+            : `Pass 3 cards ${n - dir} seats RIGHT ➡️`;
+const passTarget = (dir, you, seats) =>
+  dir ? seats[(you + dir) % seats.length]?.name : null;
 const NICE = c => (c[0] === 'T' ? '10' : c[0]) + ({ s: '♠', h: '♥', d: '♦', c: '♣' }[c[1]]);
 const sweepLine = (pub, seats) =>
   `${seats[pub.sweep.winner]?.name} takes the trick${pub.sweep.pts ? ` (+${pub.sweep.pts})` : ''}`;
@@ -23,7 +28,9 @@ export const player = {
 
     if (pub.phase === 'pass' && priv.passing) {
       state.pick = state.pick || [];
-      kids.push(h('div', { class: 'banner hot center' }, dirLabel(pub.dir, seats.length)));
+      const to = passTarget(pub.dir, you, seats);
+      kids.push(h('div', { class: 'banner hot center' },
+        dirLabel(pub.dir, seats.length), to ? ` — to ${to}` : ''));
       kids.push(handStrip(priv.hand, {
         selected: state.pick,
         onTap: c => {
@@ -73,57 +80,50 @@ export const player = {
 export const tv = tv2d((el, ctx) => {
   const { pub, seats } = ctx;
   const n = seats.length;
-  // Seats spaced evenly around the table, seat 0 at the bottom.
-  const pos = i => {
-    const th = (i / n) * 2 * Math.PI;
-    return `left:${(50 + 40 * Math.sin(th)).toFixed(1)}%;top:${(50 + 38 * Math.cos(th)).toFixed(1)}%;`
-      + 'transform:translate(-50%,-50%)';
-  };
   let center = null;
   if (pub.phase === 'pass') {
-    center = h('div', { class: 'center', style: 'position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;gap:8px' },
-      h('div', { style: 'font-size:44px;font-weight:800' }, dirLabel(pub.dir, n)),
-      h('div', { class: 'dim' }, seats.map((s, i) => pub.passedFlags?.[i] ? `${s.name} ✓` : s.name).join(' · ')));
+    center = h('div', {},
+      h('div', { style: 'font-size:40px;font-weight:800' }, dirLabel(pub.dir, n)),
+      h('div', { class: 'dim', style: 'font-size:18px;margin-top:6px' }, 'Pick 3 cards on your phone'));
   } else if (pub.phase === 'roundEnd') {
-    center = h('div', { class: 'center', style: 'position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;gap:8px' },
-      h('div', { style: 'font-size:38px;font-weight:800' },
+    center = h('div', {},
+      h('div', { style: 'font-size:32px;font-weight:800' },
         pub.shooter >= 0 ? `🌕 ${seats[pub.shooter]?.name} shot the moon!` : `Round ${pub.round} scores`),
-      seats.map((s, i) => h('div', { style: 'font-size:22px' },
+      seats.map((s, i) => h('div', { style: 'font-size:21px' },
         `${s.name}   +${pub.lastRound?.[i] ?? 0}   →   ${pub.scores[i]}`)),
-      h('div', { class: 'dim', style: 'font-size:17px;margin-top:6px' }, 'Next deal coming up…'));
+      h('div', { class: 'dim', style: 'font-size:16px;margin-top:4px' }, 'Next deal coming up…'));
   } else if (pub.sweep) {
     center = h('div', {
-      style: 'position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);'
-        + 'background:#10121fd9;border-radius:14px;padding:12px 22px;font-size:26px;font-weight:800;white-space:nowrap',
+      style: 'background:#10121fd9;border-radius:14px;padding:12px 22px;font-size:26px;font-weight:800;white-space:nowrap',
     }, `🏆 ${sweepLine(pub, seats)}`);
   } else if (pub.lastTrick && !pub.trick.length) {
-    center = h('div', { class: 'center dim', style: 'position:absolute;bottom:42%;width:100%;font-size:19px' },
+    center = h('div', { class: 'dim', style: 'font-size:19px' },
       `${seats[pub.lastTrick.winner]?.name} takes the trick`);
   }
-  mount(el,
-    h('div', { style: 'position:relative;width:min(66vh,700px);height:min(60vh,620px);background:#1d2138;border-radius:50%;box-shadow:inset 0 0 80px #0008, 0 8px 0 var(--edge)' },
-      pub.phase === 'play'
-        ? pub.trick.map(t => h('div', {
-          style: `position:absolute;${pos(t.seat)}`
-            + (pub.sweep && t.seat === pub.sweep.winner
-              ? ';filter:drop-shadow(0 0 16px #ffb52e);z-index:2' : ''),
-        }, cardEl(t.card, { size: 'lg', button: false })))
-        : null,
-      center,
-    ),
-    h('div', { class: 'tv-seats', style: 'position:absolute;bottom:0;width:100%' },
-      seats.map((s, i) => chipEl(s, {
-        turn: pub.phase === 'play' && !pub.sweep && pub.turn === i,
-        extra: `· ${pub.scores[i]}${pub.takenPts ? ' (+' + pub.takenPts[i] + ')' : ''}`,
-      }))),
-  );
+  mount(el, tableEl(seats, {
+    center,
+    // Each played card sits in front of the player who threw it.
+    inner: pub.phase === 'play' ? i => {
+      const t = pub.trick.find(t => t.seat === i);
+      return t && h('div', {
+        style: pub.sweep && i === pub.sweep.winner
+          ? 'filter:drop-shadow(0 0 16px #ffb52e)' : '',
+      }, cardEl(t.card, { size: 'lg', button: false }));
+    } : null,
+    seatEl: (s, i) => chipEl(s, {
+      turn: pub.phase === 'play' && !pub.sweep && pub.turn === i,
+      extra: `· ${pub.scores[i]}${pub.takenPts ? ' (+' + pub.takenPts[i] + ')' : ''}`
+        + (pub.phase === 'pass' ? (pub.passedFlags?.[i] ? ' ✓' : ' …') : ''),
+    }),
+  }));
 }, { peekCards: (ctx, seat) => ctx.privOf(seat)?.hand });
 
 export function padChoices({ pub, priv, seats, seat }, stage) {
   if (pub.phase === 'pass' && priv.passing) {
     stage.picks = stage.picks || [];
+    const to = passTarget(pub.dir, seat, seats);
     return {
-      title: dirLabel(pub.dir, seats.length), sticky: true,
+      title: dirLabel(pub.dir, seats.length) + (to ? ` — to ${to}` : ''), sticky: true,
       items: [
         ...priv.hand.map(c => ({
           label: NICE(c), pick: c, on: stage.picks.includes(c),
