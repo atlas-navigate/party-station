@@ -211,12 +211,18 @@ h2 { font-size: 20px; font-weight: 800; }
   position: relative;
   display: flex; align-items: center; justify-content: center;
 }
-.mini-tv .tv-table { width: 82%; height: 78%; }
+/* The felt hugs its box: just enough margin for the rim chips' overhang
+   (chips sit centered on the rim) and the turn glow. */
+.mini-tv .tv-table { width: 82%; height: 88%; }
 /* Inside the mini table everything drops a size so the rim never covers a
    played card: cards fully visible between their seat and the middle. */
 .mini-tv .tv-table .pcard.lg { width: 54px; height: 76px; border-radius: 6px; padding: 4px 5px; }
 .mini-tv .tv-table .pcard.lg .r { font-size: 16px; }
 .mini-tv .tv-table .pcard.lg .s { font-size: 20px; }
+/* Positioned boxes shrink-to-fit against the table's edge, so a right-rim
+   seat would fold into a one-word-per-line column — size seats to their
+   content instead (translate(-50%) recenters them over the rim). */
+.mini-tv .tv-seat { width: max-content; }
 .mini-tv .tv-seat .banner { min-width: 0 !important; padding: 8px 10px; }
 .mini-tv .tv-seat .banner .dim { font-size: 13px; }
 .mini-tv .tv-seat .pcard.sm { width: 34px; height: 48px; padding: 2px 3px; }

@@ -293,16 +293,24 @@ function lobbyScreen() {
 // Mini table view: the same 2D scene the TV draws (game modules ship both the
 // phone controller and the TV renderer), scaled to fit the phone. Private
 // hands stay private — privOf yields nothing, so other hands render face-down.
-const MINI_W = 820, MINI_H = 440; // logical canvas, scaled to screen width
+// Portrait phones are width-bound (the scale is pinned by screen width), so
+// the logical canvas stretches TALLER — a rounder felt — soaking up vertical
+// room that otherwise sat empty between the table and your hand. Whose turn
+// it is reads off the table itself: the active seat glows marquee-gold.
+const MINI_W = 720, MINI_H_MIN = 440, MINI_H_MAX = 720;
 function miniTable(mod, G) {
   const w = Math.min(window.innerWidth || 400, 560) - 32; // .screen padding
-  // Never let the table eat more than a third of a short screen — the
-  // phone's own controls (hand, actions) stay the main event. Whose turn it
-  // is reads off the table itself: the active seat glows marquee-gold.
-  const k = Math.min(w / MINI_W, ((window.innerHeight || 700) * 0.34) / MINI_H);
+  const vh = window.innerHeight || 700;
+  // Vertical budget: whatever the header (~55px), a two-row fanned hand
+  // (~240px), and the action bar (~175px with margins) don't need — clamped
+  // so short screens keep a table and tall ones don't drown the controls.
+  const budget = Math.max(vh * 0.30, Math.min(vh * 0.52, vh - 470));
+  let k = w / MINI_W;
+  const H = Math.max(MINI_H_MIN, Math.min(MINI_H_MAX, Math.round(budget / k)));
+  k = Math.min(k, budget / H); // short/landscape screens shrink instead
   const inner = h('div', {
     class: 'mini-tv-inner',
-    style: `width:${MINI_W}px;height:${MINI_H}px;transform:scale(${k.toFixed(4)})`,
+    style: `width:${MINI_W}px;height:${H}px;transform:scale(${k.toFixed(4)})`,
   });
   mod.tv.render2d(inner, {
     pub: G.pub, seats: G.seats, game: G,
@@ -310,7 +318,7 @@ function miniTable(mod, G) {
   });
   return h('div', {
     class: 'mini-tv',
-    style: `height:${Math.round(MINI_H * k)}px;width:${Math.round(MINI_W * k)}px;margin:0 auto 10px`,
+    style: `height:${Math.round(H * k)}px;width:${Math.round(MINI_W * k)}px;margin:0 auto 10px`,
   }, inner);
 }
 
