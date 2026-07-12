@@ -29,6 +29,10 @@ export const SYSTEMS = [
   { id: 'gb', name: 'Game Boy', icon: '🎮', cores: ['gambatte_libretro.so'], ext: ['.gb', '.zip'] },
   { id: 'gbc', name: 'Game Boy Color', icon: '🎮', cores: ['gambatte_libretro.so'], ext: ['.gbc', '.zip'] },
   { id: 'psx', name: 'PlayStation', icon: '💿', cores: ['pcsx_rearmed_libretro.so', 'duckstation_libretro.so'], ext: ['.cue', '.chd', '.pbp', '.m3u', '.iso', '.img'] },
+  // PPSSPP needs no PSP BIOS (it's a high-level emulator); RetroPie's
+  // lr-ppsspp drops the assets it does need into RetroPie/BIOS/PPSSPP,
+  // which launch() already points RetroArch's system_directory at.
+  { id: 'psp', name: 'PSP', icon: '🎮', cores: ['ppsspp_libretro.so'], ext: ['.iso', '.cso', '.pbp', '.chd'] },
   { id: 'n64', name: 'Nintendo 64', icon: '🎮', cores: ['mupen64plus_next_libretro.so', 'parallel_n64_libretro.so'], ext: ['.z64', '.n64', '.v64'] },
   { id: 'gba', name: 'Game Boy Advance', icon: '🎮', cores: ['mgba_libretro.so', 'gpsp_libretro.so'], ext: ['.gba'] },
   { id: 'atari2600', name: 'Atari 2600', icon: '🕹️', cores: ['stella2014_libretro.so', 'stella_libretro.so'], ext: ['.a26'] },

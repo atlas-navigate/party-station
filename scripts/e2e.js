@@ -267,6 +267,19 @@ if (alice.sync.emu?.available) {
   }
   ok('PS1 .iso routed to psx (bare + zipped)');
 
+  // PSP shares '.iso' with PS1 — the PSP_GAME marker inside decides. '.cso'
+  // is PSP-only, and a zipped PSP iso must land in psp/ after extraction.
+  r = await (await upload('Ridge Test (USA).iso', 'auto', 'ISO9660-junk PSP_GAME more-junk')).json();
+  if (r.system !== 'psp') throw new Error('.iso with PSP_GAME did not route to psp: ' + JSON.stringify(r));
+  r = await (await upload('Ridge Test (USA).cso')).json();
+  if (r.system !== 'psp') throw new Error('.cso did not route to psp: ' + JSON.stringify(r));
+  r = await (await fetch(`${base}/api/roms?name=${encodeURIComponent('Zipped PSP.zip')}&system=auto`,
+    { method: 'POST', body: zipOf('Zipped PSP.iso', Buffer.from('junk PSP_GAME junk')) })).json();
+  if (r.system !== 'psp' || r.file !== 'Zipped PSP.iso') {
+    throw new Error('zipped PSP iso was not unpacked to psp: ' + JSON.stringify(r));
+  }
+  ok('PSP discs route to psp (bare .iso by contents, .cso, zipped)');
+
   r = await (await fetch(`${base}/api/roms?name=${encodeURIComponent('Catan Test.zip')}&system=auto`,
     { method: 'POST', body: zipOf('Catan Test.nds', Buffer.from('NDSDATA')) })).json();
   if (!r.err || !r.err.includes('Nintendo DS')) {
@@ -299,14 +312,16 @@ if (alice.sync.emu?.available) {
     const inc = path.join(romsDir, 'incoming');
     fs.mkdirSync(inc, { recursive: true });
     fs.writeFileSync(path.join(inc, 'Dropped Game.nes'), 'fake-nes');
+    fs.writeFileSync(path.join(inc, 'Dropped UMD.iso'), 'iso-junk PSP_GAME iso-junk');
     const deadline2 = Date.now() + 15000;
     let sorted = false;
     while (Date.now() < deadline2) {
-      if (fs.existsSync(path.join(romsDir, 'nes', 'Dropped Game.nes'))) { sorted = true; break; }
+      if (fs.existsSync(path.join(romsDir, 'nes', 'Dropped Game.nes'))
+        && fs.existsSync(path.join(romsDir, 'psp', 'Dropped UMD.iso'))) { sorted = true; break; }
       await sleep(200);
     }
-    if (!sorted) throw new Error('incoming/ file was not sorted into nes/');
-    ok('scp incoming folder sorts ROMs automatically');
+    if (!sorted) throw new Error('incoming/ files were not sorted into nes/ and psp/');
+    ok('scp incoming folder sorts ROMs automatically (incl. PSP iso by contents)');
   }
 
   for (const [sys, file] of [['snes', 'Super Test (USA).sfc'], ['arcade', 'coinop.zip'],
@@ -316,7 +331,9 @@ if (alice.sync.emu?.available) {
                              ['psx', 'Blitz Disc (USA).cue'], ['psx', 'Blitz Disc (USA) (Track 1).bin'],
                              ['psx', 'Blitz Disc (USA) (Track 2).bin'],
                              ['mastersystem', 'Sonic Test (USA).sms'], ['pcengine', 'Bonk Test (USA).pce'],
-                             ['gbc', 'Stale Page.gbc']]) {
+                             ['gbc', 'Stale Page.gbc'], ['psp', 'Ridge Test (USA).iso'],
+                             ['psp', 'Ridge Test (USA).cso'], ['psp', 'Zipped PSP.iso'],
+                             ['psp', 'Dropped UMD.iso']]) {
     await fetch(`${base}/api/roms/${sys}/${encodeURIComponent(file)}`, { method: 'DELETE' });
   }
   const lib2 = await (await fetch(`${base}/api/roms`)).json();

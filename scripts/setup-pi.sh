@@ -333,7 +333,7 @@ EOF
     # last — it is by far the longest build when compiling from source.
     # </dev/null: our stdin is the curl pipe; a child must never read it.
     for pkg in retroarch lr-fceumm lr-snes9x lr-genesis-plus-gx lr-gambatte lr-mgba lr-pcsx-rearmed \
-               lr-mupen64plus-next lr-stella2014 lr-beetle-pce-fast lr-mame2003-plus; do
+               lr-mupen64plus-next lr-stella2014 lr-beetle-pce-fast lr-ppsspp lr-mame2003-plus; do
       if [ -d "/opt/retropie/emulators/$pkg" ] || [ -d "/opt/retropie/libretrocores/$pkg" ]; then
         echo "    $pkg — already installed"
         continue

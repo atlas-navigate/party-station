@@ -13,18 +13,33 @@ import { ROMS_DIR, SYSTEMS, coreAvailable } from './emulator.js';
 const TARGETS = SYSTEMS.filter(s => !['mame-libretro', 'fba'].includes(s.id));
 
 // Extension → default system. '.zip' and '.bin' are ambiguous (a zip could be
-// a console ROM, a lone .bin could be PS1) — the page lets users override.
+// a console ROM, a lone .bin could be PS1), and '.iso' could be PS1 or PSP —
+// isoSystem() peeks inside; the page lets users override the rest.
 const EXT_ROUTE = {
   '.nes': 'nes',
   '.sfc': 'snes', '.smc': 'snes',
   '.md': 'megadrive', '.gen': 'megadrive', '.bin': 'megadrive',
   '.sms': 'mastersystem', '.gg': 'gamegear',
   '.cue': 'psx', '.chd': 'psx', '.pbp': 'psx', '.m3u': 'psx', '.iso': 'psx', '.img': 'psx',
+  '.cso': 'psp',
   '.z64': 'n64', '.n64': 'n64', '.v64': 'n64',
   '.gba': 'gba',
   '.a26': 'atari2600', '.pce': 'pcengine',
   '.zip': 'arcade',
 };
+
+// PSP and PS1 discs share '.iso'. A PSP UMD is an ISO9660 image with a
+// PSP_GAME/ folder at its root — that string sits in the early directory
+// records, so one look at the first 2MB tells the two apart.
+export function isoSystem(file) {
+  try {
+    const fd = fs.openSync(file, 'r');
+    const head = Buffer.alloc(2 * 1024 * 1024);
+    const n = fs.readSync(fd, head, 0, head.length, 0);
+    fs.closeSync(fd);
+    return head.subarray(0, n).includes('PSP_GAME') ? 'psp' : 'psx';
+  } catch { return 'psx'; }
+}
 
 const MAX_BYTES = 4 * 1024 ** 3;
 
@@ -57,6 +72,7 @@ const ZIP_INNER = {
   '.z64': 'n64', '.n64': 'n64', '.v64': 'n64',
   '.a26': 'atari2600', '.pce': 'pcengine',
   '.chd': 'psx', '.pbp': 'psx', '.cue': 'psx', '.iso': 'psx', '.img': 'psx',
+  '.cso': 'psp',
 };
 
 // First probe: is this file actually a zip? Downloads regularly arrive as
@@ -128,7 +144,7 @@ export function zipEntries(file) {
 const ZIP_UNSUPPORTED = {
   '.nds': 'Nintendo DS', '.3ds': 'Nintendo 3DS', '.cia': 'Nintendo 3DS',
   '.wbfs': 'Wii', '.rvz': 'GameCube/Wii', '.gcm': 'GameCube', '.gcz': 'GameCube',
-  '.cso': 'PSP', '.wux': 'Wii U', '.xci': 'Switch', '.nsp': 'Switch',
+  '.wux': 'Wii U', '.xci': 'Switch', '.nsp': 'Switch',
 };
 
 function sniffEntries(entries) {
@@ -214,10 +230,19 @@ export async function extractConsoleZip(src, entries) {
     const sysId = BIOS_NAMES.test(base) ? 'bios'
       : ZIP_INNER[ext] || (hasCue && DISC_SET_EXT.has(ext) ? 'psx' : null);
     if (!sysId || (sysId !== 'bios' && !systemDir(sysId))) continue;
+    let finalSys = sysId;
     const dir = destDirFor(sysId);
     fs.mkdirSync(dir, { recursive: true });
-    await extractEntry(src, e, path.join(dir, base));
-    extracted.push({ file: base, system: sysId });
+    const dest = path.join(dir, base);
+    await extractEntry(src, e, dest);
+    // A zipped .iso sniffs as PS1 by extension, but it may be a PSP UMD —
+    // now that the bytes are out, peek and relocate.
+    if (ext === '.iso' && sysId === 'psx' && !hasCue && isoSystem(dest) === 'psp' && systemDir('psp')) {
+      fs.mkdirSync(destDirFor('psp'), { recursive: true });
+      fs.renameSync(dest, path.join(destDirFor('psp'), base));
+      finalSys = 'psp';
+    }
+    extracted.push({ file: base, system: finalSys });
   }
   return extracted;
 }
@@ -322,9 +347,10 @@ const warned = new Set();    // unroutable files we already logged about
 const extracting = new Set(); // zips currently being unpacked (skip re-entry)
 
 // A lone .bin usually means Genesis, but next to a same-named .cue it's a
-// PS1 disc image and must stay with its cue sheet. (Console zips never
-// reach here — sortIncoming unpacks them first.)
-function routeIncoming(file, siblings) {
+// PS1 disc image and must stay with its cue sheet; a lone .iso is PS1 or
+// PSP — its contents decide. (Console zips never reach here — sortIncoming
+// unpacks them first.)
+function routeIncoming(file, siblings, src) {
   const ext = path.extname(file).toLowerCase();
   const base = file.slice(0, -ext.length).replace(/\s*\(track \d+\)/i, '');
   if (ext === '.bin') {
@@ -333,6 +359,7 @@ function routeIncoming(file, siblings) {
       || psxCueWants(file);
     if (hasCue) return 'psx';
   }
+  if (ext === '.iso') return isoSystem(src);
   return routeFor(file);
 }
 
@@ -412,7 +439,7 @@ function sortIncoming(onChange) {
       }
     }
 
-    const systemId = routeIncoming(file, files);
+    const systemId = routeIncoming(file, files, src);
     if (!systemId) {
       if (!warned.has(file)) {
         warned.add(file);
@@ -580,6 +607,13 @@ export function romsRouter({ onChange }) {
           // Couldn't unpack — at least park the zip with the right system.
           finalSystem = sniffed;
           finalDest = path.join(destDirFor(sniffed), name);
+        }
+      } else if (!isBios && wanted === 'auto' && path.extname(name).toLowerCase() === '.iso') {
+        // Auto-routed .iso streamed toward psx/ — the bytes decide PS1 vs PSP.
+        const sys = isoSystem(tmp);
+        if (sys !== finalSystem && systemDir(sys)) {
+          finalSystem = sys;
+          finalDest = path.join(systemDir(sys), name);
         }
       }
       try {
