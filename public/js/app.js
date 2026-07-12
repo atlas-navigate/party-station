@@ -296,9 +296,10 @@ function lobbyScreen() {
 const MINI_W = 820, MINI_H = 440; // logical canvas, scaled to screen width
 function miniTable(mod, G) {
   const w = Math.min(window.innerWidth || 400, 560) - 32; // .screen padding
-  // Never let the table eat more than ~30% of a short screen — the phone's
-  // own controls (hand, actions) stay the main event.
-  const k = Math.min(w / MINI_W, ((window.innerHeight || 700) * 0.30) / MINI_H);
+  // Never let the table eat more than a third of a short screen — the
+  // phone's own controls (hand, actions) stay the main event. Whose turn it
+  // is reads off the table itself: the active seat glows marquee-gold.
+  const k = Math.min(w / MINI_W, ((window.innerHeight || 700) * 0.34) / MINI_H);
   const inner = h('div', {
     class: 'mini-tv-inner',
     style: `width:${MINI_W}px;height:${MINI_H}px;transform:scale(${k.toFixed(4)})`,
@@ -311,21 +312,6 @@ function miniTable(mod, G) {
     class: 'mini-tv',
     style: `height:${Math.round(MINI_H * k)}px;width:${Math.round(MINI_W * k)}px;margin:0 auto 10px`,
   }, inner);
-}
-
-// With the table view up, whose-turn info lives at the very top of the
-// screen: the game's own status line if it provides one, else a generic
-// line from the server's awaiting list.
-function turnStrip(mod, ctx, G) {
-  let st = mod.player.status?.(ctx) || null;
-  if (!st) {
-    const a = G.awaiting || [];
-    if (!a.length) return null;
-    st = a.includes(G.yourSeat)
-      ? { text: 'Your turn', hot: true }
-      : { text: `${a.map(i => G.seats[i]?.name).filter(Boolean).join(', ')}${a.length > 1 ? ' are' : ' is'} up…` };
-  }
-  return h('div', { class: 'banner center turn-strip' + (st.hot ? ' hot' : '') }, st.text);
 }
 
 function gameScreen() {
@@ -388,7 +374,6 @@ function gameScreen() {
           onclick: () => confirmQuit(),
         }, '💾 Exit'),
       )),
-    showTable ? turnStrip(mod, ctx, G) : null,
     showTable ? miniTable(mod, G) : null,
     // dropped players / takeover
     G.seats.some(s => s.bot) && G.yourSeat < 0

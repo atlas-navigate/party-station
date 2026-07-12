@@ -2,21 +2,7 @@ import { h, mount, cardEl, sheet, tableEl, tv2d } from '../ui.js';
 
 const STREETS = ['Pre-flop', 'Flop', 'Turn', 'River'];
 
-const statusOf = (pub, priv, you, seats) => {
-  if (you < 0 || !priv) return null;
-  if (pub.busted[you]) return { text: 'You busted out — spectating. 💀' };
-  if (pub.phase === 'payout') {
-    const won = pub.results?.pots?.filter(p => p.winners.includes(you))
-      .reduce((a, p) => a + p.amount, 0) || 0;
-    return won ? { text: `You win ${won}! 🎉`, hot: true } : { text: 'Hand over.' };
-  }
-  if (!pub.inHand[you]) return { text: 'Folded — waiting for the next hand.' };
-  if (priv.yourTurn) return { text: priv.toCall > 0 ? `${priv.toCall} to call` : 'Your action', hot: true };
-  return { text: pub.turn >= 0 ? `${seats[pub.turn]?.name} is thinking…` : 'Dealing…' };
-};
-
 export const player = {
-  status: ctx => statusOf(ctx.pub, ctx.priv, ctx.you, ctx.seats),
   render(el, ctx) {
     const { pub, priv, you, seats, send } = ctx;
     if (you < 0) { mount(el, h('p', { class: 'dim center' }, 'Watch the big screen!')); return; }
@@ -28,7 +14,7 @@ export const player = {
       h('span', { class: 'dim' }, `Hand #${pub.handNum} · Pot ${pub.pot}`)));
 
     if (pub.busted[you]) {
-      if (!ctx.tableShown) kids.push(h('div', { class: 'banner center' }, 'You busted out — spectating. 💀'));
+      kids.push(h('div', { class: 'banner center' }, 'You busted out — spectating. 💀'));
       mount(el, ...kids); return;
     }
 
@@ -64,12 +50,11 @@ export const player = {
       }
     }
     if (pub.phase === 'payout') {
+      // Your result is personal news, not table state — always shown.
       const r = pub.results;
       const won = r?.pots?.filter(p => p.winners.includes(you)).reduce((a, p) => a + p.amount, 0) || 0;
-      if (!ctx.tableShown) {
-        kids.push(h('div', { class: 'banner center' + (won ? ' hot' : ''), style: 'margin-top:8px' },
-          won ? `You win ${won}! 🎉` : 'Hand over.'));
-      }
+      kids.push(h('div', { class: 'banner center' + (won ? ' hot' : ''), style: 'margin-top:8px' },
+        won ? `You win ${won}! 🎉` : 'Hand over.'));
       kids.push(h('div', { class: 'actionbar' },
         h('button', { class: 'tok primary big', onclick: () => send({ t: 'next' }) }, 'Next hand →')));
     }

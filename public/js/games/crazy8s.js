@@ -10,7 +10,6 @@ const statusOf = (pub, you, seats) => you < 0 ? null
     : { text: `${seats[pub.turn]?.name}’s turn…` };
 
 export const player = {
-  status: ctx => statusOf(ctx.pub, ctx.you, ctx.seats),
   render(el, ctx) {
     const { pub, priv, you, seats, send } = ctx;
     if (you < 0) { mount(el, h('p', { class: 'dim center' }, 'Watch the big screen!')); return; }

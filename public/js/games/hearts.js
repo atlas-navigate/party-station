@@ -15,8 +15,9 @@ const NICE = c => (c[0] === 'T' ? '10' : c[0]) + ({ s: '♠', h: '♥', d: '♦'
 const sweepLine = (pub, seats) =>
   `${seats[pub.sweep.winner]?.name} takes the trick${pub.sweep.pts ? ` (+${pub.sweep.pts})` : ''}`;
 
-// One status line for "what's happening / whose turn": the in-body banner
-// normally, the shell's top strip when the table view is up (player.status).
+// One status line for "what's happening / whose turn" — shown as the body
+// banner when the table view is off (the table itself carries it otherwise:
+// the active seat glows, the felt center narrates passes and sweeps).
 const statusOf = (pub, priv, you, seats) => {
   if (you < 0 || !priv) return null;
   if (pub.phase === 'pass') {
@@ -40,7 +41,6 @@ const statusOf = (pub, priv, you, seats) => {
 };
 
 export const player = {
-  status: ctx => statusOf(ctx.pub, ctx.priv, ctx.you, ctx.seats),
   render(el, ctx) {
     const { pub, priv, you, seats, send, state } = ctx;
     if (you < 0) { mount(el, h('p', { class: 'dim center' }, 'Watch the big screen!')); return; }

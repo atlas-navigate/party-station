@@ -2,26 +2,7 @@ import { h, mount, cardEl, tableEl, tv2d } from '../ui.js';
 
 const CHIP_VALUES = [10, 25, 50, 100];
 
-const statusOf = (pub, priv, you, seats) => {
-  if (you < 0 || !priv) return null;
-  if (pub.phase === 'bet') {
-    return priv.betting
-      ? { text: 'Place your bet', hot: true }
-      : { text: pub.bank[you] < pub.minBet ? 'You’re out of chips — spectating this round.' : 'Bet placed ✓ — waiting for the table…' };
-  }
-  if (pub.phase === 'payout') {
-    const r = pub.results[you];
-    return r
-      ? { text: `${r.label} ${r.delta > 0 ? '+' : ''}${r.delta}`, hot: r.delta > 0 }
-      : { text: 'Round over' };
-  }
-  return pub.turn === you
-    ? { text: 'Your move', hot: true }
-    : { text: `${seats[pub.turn]?.name ?? 'Dealer'} is playing…` };
-};
-
 export const player = {
-  status: ctx => statusOf(ctx.pub, ctx.priv, ctx.you, ctx.seats),
   render(el, ctx) {
     const { pub, priv, you, seats, send } = ctx;
     if (you < 0) { mount(el, h('p', { class: 'dim center' }, 'Watch the big screen!')); return; }
@@ -71,8 +52,9 @@ export const player = {
           pub.turn === you ? '' : `${seats[pub.turn]?.name ?? 'Dealer'} is playing…`));
       }
       if (pub.phase === 'payout') {
+        // Your result is personal news, not table state — always shown.
         const r = pub.results[you];
-        if (r && !ctx.tableShown) {
+        if (r) {
           kids.push(h('div', { class: 'banner center ' + (r.delta > 0 ? 'hot' : ''), style: 'margin-top:10px;font-size:20px' },
             `${r.label} ${r.delta > 0 ? '+' : ''}${r.delta}`));
         }
