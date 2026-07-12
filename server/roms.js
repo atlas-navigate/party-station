@@ -21,23 +21,27 @@ const EXT_ROUTE = {
   '.md': 'megadrive', '.gen': 'megadrive', '.bin': 'megadrive',
   '.sms': 'mastersystem', '.gg': 'gamegear',
   '.cue': 'psx', '.chd': 'psx', '.pbp': 'psx', '.m3u': 'psx', '.iso': 'psx', '.img': 'psx',
-  '.cso': 'psp',
+  '.cso': 'psp', '.elf': 'ps2',
   '.z64': 'n64', '.n64': 'n64', '.v64': 'n64',
   '.gba': 'gba',
   '.a26': 'atari2600', '.pce': 'pcengine',
   '.zip': 'arcade',
 };
 
-// PSP and PS1 discs share '.iso'. A PSP UMD is an ISO9660 image with a
-// PSP_GAME/ folder at its root — that string sits in the early directory
-// records, so one look at the first 2MB tells the two apart.
+// PSP, PS2 and PS1 discs all share '.iso'. A PSP UMD is an ISO9660 image
+// with a PSP_GAME/ folder at its root, and a PS2 disc's SYSTEM.CNF boots
+// via "BOOT2 =" (PS1 uses "BOOT ="). Both strings sit in the disc's early
+// sectors, so one look at the first 2MB tells the three apart.
 export function isoSystem(file) {
   try {
     const fd = fs.openSync(file, 'r');
     const head = Buffer.alloc(2 * 1024 * 1024);
     const n = fs.readSync(fd, head, 0, head.length, 0);
     fs.closeSync(fd);
-    return head.subarray(0, n).includes('PSP_GAME') ? 'psp' : 'psx';
+    const bytes = head.subarray(0, n);
+    if (bytes.includes('PSP_GAME')) return 'psp';
+    if (bytes.includes('BOOT2')) return 'ps2';
+    return 'psx';
   } catch { return 'psx'; }
 }
 
@@ -235,12 +239,15 @@ export async function extractConsoleZip(src, entries) {
     fs.mkdirSync(dir, { recursive: true });
     const dest = path.join(dir, base);
     await extractEntry(src, e, dest);
-    // A zipped .iso sniffs as PS1 by extension, but it may be a PSP UMD —
-    // now that the bytes are out, peek and relocate.
-    if (ext === '.iso' && sysId === 'psx' && !hasCue && isoSystem(dest) === 'psp' && systemDir('psp')) {
-      fs.mkdirSync(destDirFor('psp'), { recursive: true });
-      fs.renameSync(dest, path.join(destDirFor('psp'), base));
-      finalSys = 'psp';
+    // A zipped .iso sniffs as PS1 by extension, but it may be a PSP UMD or
+    // a PS2 disc — now that the bytes are out, peek and relocate.
+    if (ext === '.iso' && sysId === 'psx' && !hasCue) {
+      const real = isoSystem(dest);
+      if (real !== 'psx' && systemDir(real)) {
+        fs.mkdirSync(destDirFor(real), { recursive: true });
+        fs.renameSync(dest, path.join(destDirFor(real), base));
+        finalSys = real;
+      }
     }
     extracted.push({ file: base, system: finalSys });
   }
@@ -609,7 +616,7 @@ export function romsRouter({ onChange }) {
           finalDest = path.join(destDirFor(sniffed), name);
         }
       } else if (!isBios && wanted === 'auto' && path.extname(name).toLowerCase() === '.iso') {
-        // Auto-routed .iso streamed toward psx/ — the bytes decide PS1 vs PSP.
+        // Auto-routed .iso streamed toward psx/ — the bytes decide PS1 vs PSP vs PS2.
         const sys = isoSystem(tmp);
         if (sys !== finalSystem && systemDir(sys)) {
           finalSystem = sys;

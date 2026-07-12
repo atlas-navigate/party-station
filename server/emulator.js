@@ -21,6 +21,17 @@ export const SYSTEMS = [
   { id: 'arcade', name: 'Arcade (MAME)', icon: '🕹️', cores: ['mame2003_plus_libretro.so', 'fbneo_libretro.so', 'mame2003_libretro.so'], ext: ['.zip'] },
   { id: 'mame-libretro', name: 'Arcade (MAME)', icon: '🕹️', cores: ['mame2003_plus_libretro.so', 'mame2003_libretro.so'], ext: ['.zip'] },
   { id: 'fba', name: 'Arcade (FBNeo)', icon: '🕹️', cores: ['fbneo_libretro.so'], ext: ['.zip'] },
+  // Later arcade boards MAME 2003 (romset 0.78) can't run — zips must match
+  // the MAME 0.139 set. Anything newer than this is beyond a Pi 4 anyway.
+  { id: 'mame2010', name: 'Arcade (MAME 2010)', icon: '🕹️', cores: ['mame2010_libretro.so'], ext: ['.zip'] },
+  // Capcom Play System boards, run by FBNeo (or the split FBAlpha 2012 CPS
+  // cores if installed). CPS-1/2 are easy for a Pi 4; CPS-3 is borderline.
+  { id: 'cps1', name: 'Capcom (CPS-1)', icon: '🕹️', cores: ['fbneo_libretro.so', 'fbalpha2012_cps1_libretro.so'], ext: ['.zip'] },
+  { id: 'cps2', name: 'Capcom (CPS-2)', icon: '🕹️', cores: ['fbneo_libretro.so', 'fbalpha2012_cps2_libretro.so'], ext: ['.zip'] },
+  { id: 'cps3', name: 'Capcom (CPS-3)', icon: '🕹️', cores: ['fbneo_libretro.so', 'fbalpha2012_cps3_libretro.so'], ext: ['.zip'] },
+  // Neo Geo needs the neogeo.zip BIOS alongside the game zips (or in
+  // RetroPie/BIOS — launch() points RetroArch's system dir there).
+  { id: 'neogeo', name: 'Neo Geo', icon: '🕹️', cores: ['fbneo_libretro.so', 'fbalpha2012_neogeo_libretro.so'], ext: ['.zip'] },
   { id: 'nes', name: 'NES', icon: '🎮', cores: ['fceumm_libretro.so', 'nestopia_libretro.so'], ext: ['.nes', '.zip'] },
   { id: 'snes', name: 'SNES', icon: '🎮', cores: ['snes9x_libretro.so', 'snes9x2010_libretro.so'], ext: ['.sfc', '.smc', '.zip'] },
   { id: 'megadrive', name: 'Genesis', icon: '🎮', cores: ['genesis_plus_gx_libretro.so', 'picodrive_libretro.so'], ext: ['.md', '.gen', '.bin', '.zip'] },
@@ -33,6 +44,10 @@ export const SYSTEMS = [
   // lr-ppsspp drops the assets it does need into RetroPie/BIOS/PPSSPP,
   // which launch() already points RetroArch's system_directory at.
   { id: 'psp', name: 'PSP', icon: '🎮', cores: ['ppsspp_libretro.so'], ext: ['.iso', '.cso', '.pbp', '.chd'] },
+  // PS2 has no RetroPie-packaged core; the slot lights up if a core (Play!
+  // needs no BIOS; LRPS2 wants one) is dropped in. Fair warning: a Pi 4
+  // runs most PS2 discs far below full speed — this is a "try it" shelf.
+  { id: 'ps2', name: 'PlayStation 2', icon: '💿', cores: ['play_libretro.so', 'pcsx2_libretro.so'], ext: ['.iso', '.chd', '.cso', '.elf'] },
   { id: 'n64', name: 'Nintendo 64', icon: '🎮', cores: ['mupen64plus_next_libretro.so', 'parallel_n64_libretro.so'], ext: ['.z64', '.n64', '.v64'] },
   { id: 'gba', name: 'Game Boy Advance', icon: '🎮', cores: ['mgba_libretro.so', 'gpsp_libretro.so'], ext: ['.gba'] },
   { id: 'atari2600', name: 'Atari 2600', icon: '🕹️', cores: ['stella2014_libretro.so', 'stella_libretro.so'], ext: ['.a26'] },
@@ -87,28 +102,50 @@ const cleanTitle = f => f
 // common ones to real titles so the hub reads properly and box-art lookups
 // (server/art.js matches by title) can find them.
 const ARCADE_TITLES = {
-  '10yard': '10-Yard Fight', 1942: '1942', 1943: '1943', 1944: '1944',
-  arkanoid: 'Arkanoid', asteroid: 'Asteroids', berzerk: 'Berzerk',
+  '10yard': '10-Yard Fight', 1941: '1941: Counter Attack', 1942: '1942',
+  1943: '1943', 1944: '1944', '19xx': '19XX',
+  arkanoid: 'Arkanoid', asteroid: 'Asteroids', avsp: 'Alien vs. Predator',
+  berzerk: 'Berzerk',
   blitz: 'NFL Blitz', blitz99: 'NFL Blitz ’99', bombjack: 'Bomb Jack',
-  btime: 'Burger Time', centiped: 'Centipede', contra: 'Contra',
-  ddragon: 'Double Dragon', defender: 'Defender', digdug: 'Dig Dug',
-  dkong: 'Donkey Kong', dkongjr: 'Donkey Kong Junior', frogger: 'Frogger',
-  galaga: 'Galaga', galaxian: 'Galaxian', gauntlet: 'Gauntlet',
-  joust: 'Joust', klax: 'Klax', kof98: 'The King of Fighters ’98',
-  kungfum: 'Kung-Fu Master', marble: 'Marble Madness',
+  btime: 'Burger Time', captcomm: 'Captain Commando', centiped: 'Centipede',
+  contra: 'Contra', ddragon: 'Double Dragon', defender: 'Defender',
+  digdug: 'Dig Dug', dino: 'Cadillacs and Dinosaurs',
+  dkong: 'Donkey Kong', dkongjr: 'Donkey Kong Junior',
+  dstlk: 'Darkstalkers', ffight: 'Final Fight', frogger: 'Frogger',
+  galaga: 'Galaga', galaxian: 'Galaxian', garou: 'Garou: Mark of the Wolves',
+  gauntlet: 'Gauntlet', ghouls: 'Ghouls ’n Ghosts',
+  joust: 'Joust', klax: 'Klax', knights: 'Knights of the Round',
+  kod: 'The King of Dragons', kof98: 'The King of Fighters ’98',
+  kungfum: 'Kung-Fu Master', lastblad: 'The Last Blade',
+  marble: 'Marble Madness', mercs: 'Mercs',
   missile: 'Missile Command', mk: 'Mortal Kombat', mk2: 'Mortal Kombat II',
-  mk3: 'Mortal Kombat 3', mslug: 'Metal Slug', mslug2: 'Metal Slug 2',
+  mk3: 'Mortal Kombat 3', msh: 'Marvel Super Heroes',
+  mshvsf: 'Marvel Super Heroes vs. Street Fighter',
+  mslug: 'Metal Slug', mslug2: 'Metal Slug 2',
   mslug3: 'Metal Slug 3', mslugx: 'Metal Slug X', mspacman: 'Ms. Pac-Man',
-  nbajam: 'NBA Jam', nbajamte: 'NBA Jam T.E.', outrun: 'Out Run',
-  pacman: 'Pac-Man', paperboy: 'Paperboy', phoenix: 'Phoenix',
-  popeye: 'Popeye', puckman: 'Puck Man', punchout: 'Punch-Out!!',
+  mvsc: 'Marvel vs. Capcom', nbajam: 'NBA Jam', nbajamte: 'NBA Jam T.E.',
+  outrun: 'Out Run', pacman: 'Pac-Man', paperboy: 'Paperboy',
+  phoenix: 'Phoenix', popeye: 'Popeye', progear: 'Progear',
+  puckman: 'Puck Man', punchout: 'Punch-Out!!', punisher: 'The Punisher',
   qbert: 'Q*bert', rampage: 'Rampage', robotron: 'Robotron 2084',
-  scramble: 'Scramble', sf2: 'Street Fighter II', simpsons: 'The Simpsons',
-  sinistar: 'Sinistar', spyhunt: 'Spy Hunter', tempest: 'Tempest',
+  samsho2: 'Samurai Shodown II', scramble: 'Scramble',
+  sf2: 'Street Fighter II', sf2ce: 'Street Fighter II’: Champion Edition',
+  sf2hf: 'Street Fighter II’: Hyper Fighting',
+  sfa: 'Street Fighter Alpha', sfa2: 'Street Fighter Alpha 2',
+  sfa3: 'Street Fighter Alpha 3',
+  sfiii: 'Street Fighter III', sfiii2: 'Street Fighter III: 2nd Impact',
+  sfiii3: 'Street Fighter III: 3rd Strike',
+  simpsons: 'The Simpsons', sinistar: 'Sinistar', spyhunt: 'Spy Hunter',
+  ssf2: 'Super Street Fighter II', ssf2t: 'Super Street Fighter II Turbo',
+  strider: 'Strider', tempest: 'Tempest',
   tmnt: 'Teenage Mutant Ninja Turtles', tron: 'Tron',
-  umk3: 'Ultimate Mortal Kombat 3', xmen: 'X-Men', zaxxon: 'Zaxxon',
+  umk3: 'Ultimate Mortal Kombat 3', vsav: 'Vampire Savior',
+  willow: 'Willow', xmen: 'X-Men',
+  xmvsf: 'X-Men vs. Street Fighter', zaxxon: 'Zaxxon',
 };
-const ARCADE_SYSTEMS = new Set(['arcade', 'mame-libretro', 'fba']);
+const ARCADE_SYSTEMS = new Set([
+  'arcade', 'mame-libretro', 'fba', 'mame2010', 'cps1', 'cps2', 'cps3', 'neogeo',
+]);
 
 // MAME clone/revision dumps tack suffixes onto the parent shortname
 // (nbajamr2 = NBA Jam rev 2, 10yardj = the Japan set) — peel "rN" and then
