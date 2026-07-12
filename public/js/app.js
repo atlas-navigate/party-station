@@ -9,6 +9,7 @@ let scratch = {};           // per-game-session module scratch space
 const modules = {};         // gameId -> loaded client module
 let padActive = false;
 let hubMode = null;         // landing choice: 'party' | 'retro' (asked once per visit)
+let tableView = localStorage.getItem('ps-tableview') === '1'; // mini TV table in games
 
 // After a self-update the server restarts with new client code; reload
 // idle phones so they don't keep driving it with the old bundle.
@@ -289,6 +290,24 @@ function lobbyScreen() {
   );
 }
 
+// Mini table view: the same 2D scene the TV draws (game modules ship both the
+// phone controller and the TV renderer), scaled to fit the phone. Private
+// hands stay private — privOf yields nothing, so other hands render face-down.
+const MINI_W = 820, MINI_H = 440; // logical canvas, scaled to screen width
+function miniTable(mod, G) {
+  const w = Math.min(window.innerWidth || 400, 560) - 32; // .screen padding
+  const k = w / MINI_W;
+  const inner = h('div', {
+    class: 'mini-tv-inner',
+    style: `width:${MINI_W}px;height:${MINI_H}px;transform:scale(${k.toFixed(4)})`,
+  });
+  mod.tv.render2d(inner, {
+    pub: G.pub, seats: G.seats, game: G,
+    peeked: new Set(), padSeats: {}, privOf: () => null,
+  });
+  return h('div', { class: 'mini-tv', style: `height:${Math.round(MINI_H * k)}px` }, inner);
+}
+
 function gameScreen() {
   const G = sync.game;
   const g = sync.games.find(x => x.id === G.gameId);
@@ -332,11 +351,21 @@ function gameScreen() {
       h('div', { class: 'row' }, h('span', { style: 'font-size:22px' }, g.icon), h('h2', {}, g.name)),
       h('div', { class: 'row' },
         G.yourSeat < 0 && h('span', { class: 'dim', style: 'font-size:13px' }, 'spectating'),
+        mod.tv?.render2d && h('button', {
+          class: 'tok small' + (tableView ? '' : ' ghost'),
+          onclick: () => {
+            tableView = !tableView;
+            localStorage.setItem('ps-tableview', tableView ? '1' : '');
+            render();
+          },
+          'aria-label': tableView ? 'Hide table view' : 'Show table view',
+        }, '📺'),
         (G.yourSeat >= 0 || G.youAreHost) && h('button', {
           class: 'tok small ghost',
           onclick: () => confirmQuit(),
         }, '💾 Exit'),
       )),
+    tableView && mod.tv?.render2d ? miniTable(mod, G) : null,
     // dropped players / takeover
     G.seats.some(s => s.bot) && G.yourSeat < 0
       ? h('div', { class: 'banner', style: 'margin-bottom:10px;font-size:13px' },
@@ -428,6 +457,10 @@ function gameoverScreen() {
 }
 
 // ---------------------------------------------------------------- render
+
+// Rotating the phone changes the widths the mini table and fanned hand are
+// sized against — re-render in-game so both fit the new orientation.
+window.addEventListener('resize', () => { if (sync?.phase === 'game') render(); });
 
 function render() {
   if (!sync) return;

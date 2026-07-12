@@ -191,6 +191,17 @@ h2 { font-size: 20px; font-weight: 800; }
   z-index: 2;
 }
 
+/* Phone "table view": the TV's 2D table scene shrunk onto the phone. The
+   inner box is a fixed logical canvas (sized + scaled inline by miniTable in
+   app.js); the table gets margins inside it so the rim chips stay visible. */
+.mini-tv { overflow: hidden; margin-bottom: 10px; border-radius: 14px; }
+.mini-tv-inner {
+  transform-origin: top left;
+  position: relative;
+  display: flex; align-items: center; justify-content: center;
+}
+.mini-tv .tv-table { width: 74%; height: 76%; }
+
 /* ---------------------------------------------------------------- bars */
 .actionbar {
   position: fixed; left: 0; right: 0; bottom: 0;

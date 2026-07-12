@@ -88,6 +88,9 @@ export function handStrip(cards, { legal = null, selected = [], onTap, size = ''
 // the only place a pad player can check their hand.
 export function tv2d(render, { peekCards } = {}) {
   return {
+    // The raw per-sync render, exposed so the phone app can draw the same
+    // table scene (scaled down) without the console's scene lifecycle.
+    render2d: render,
     mount(holder) {
       // .tv-main fills the scene area and centers the game, like the shell
       // did before games moved to 3D; absolute because .tv-scene isn't flex.
