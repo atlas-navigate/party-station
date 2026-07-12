@@ -21,6 +21,9 @@ export const SYSTEMS = [
   { id: 'arcade', name: 'Arcade (MAME)', icon: '🕹️', cores: ['mame2003_plus_libretro.so', 'fbneo_libretro.so', 'mame2003_libretro.so'], ext: ['.zip'] },
   { id: 'mame-libretro', name: 'Arcade (MAME)', icon: '🕹️', cores: ['mame2003_plus_libretro.so', 'mame2003_libretro.so'], ext: ['.zip'] },
   { id: 'fba', name: 'Arcade (FBNeo)', icon: '🕹️', cores: ['fbneo_libretro.so'], ext: ['.zip'] },
+  // Ancient 0.37b5 romsets (old "MAME4ALL"-era packs) predate what MAME
+  // 2003 reads — this shelf runs them as-is instead of demanding redumps.
+  { id: 'mame2000', name: 'Arcade (MAME 2000)', icon: '🕹️', cores: ['mame2000_libretro.so'], ext: ['.zip'] },
   // Later arcade boards MAME 2003 (romset 0.78) can't run — zips must match
   // the MAME 0.139 set. Anything newer than this is beyond a Pi 4 anyway.
   { id: 'mame2010', name: 'Arcade (MAME 2010)', icon: '🕹️', cores: ['mame2010_libretro.so'], ext: ['.zip'] },
@@ -144,7 +147,8 @@ const ARCADE_TITLES = {
   xmvsf: 'X-Men vs. Street Fighter', zaxxon: 'Zaxxon',
 };
 const ARCADE_SYSTEMS = new Set([
-  'arcade', 'mame-libretro', 'fba', 'mame2010', 'cps1', 'cps2', 'cps3', 'neogeo',
+  'arcade', 'mame-libretro', 'fba', 'mame2000', 'mame2010',
+  'cps1', 'cps2', 'cps3', 'neogeo',
 ]);
 
 // MAME clone/revision dumps tack suffixes onto the parent shortname

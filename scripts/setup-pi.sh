@@ -334,7 +334,7 @@ EOF
     # </dev/null: our stdin is the curl pipe; a child must never read it.
     for pkg in retroarch lr-fceumm lr-snes9x lr-genesis-plus-gx lr-gambatte lr-mgba lr-pcsx-rearmed \
                lr-mupen64plus-next lr-stella2014 lr-beetle-pce-fast lr-ppsspp \
-               lr-fbneo lr-mame2010 lr-mame2003-plus; do
+               lr-fbneo lr-mame2000 lr-mame2010 lr-mame2003-plus; do
       if [ -d "/opt/retropie/emulators/$pkg" ] || [ -d "/opt/retropie/libretrocores/$pkg" ]; then
         echo "    $pkg — already installed"
         continue
@@ -368,7 +368,8 @@ EOF
     rm -rf "$JOY_TMP"
 
     sudo -u "$RUN_USER" mkdir -p \
-      "$HOME_DIR/RetroPie/roms/arcade" "$HOME_DIR/RetroPie/roms/mame2010" \
+      "$HOME_DIR/RetroPie/roms/arcade" "$HOME_DIR/RetroPie/roms/mame2000" \
+      "$HOME_DIR/RetroPie/roms/mame2010" \
       "$HOME_DIR/RetroPie/roms/cps1" "$HOME_DIR/RetroPie/roms/cps2" \
       "$HOME_DIR/RetroPie/roms/cps3" "$HOME_DIR/RetroPie/roms/neogeo" \
       "$HOME_DIR/RetroPie/roms/nes" \
