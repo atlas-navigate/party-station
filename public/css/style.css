@@ -177,15 +177,18 @@ h2 { font-size: 20px; font-weight: 800; }
 .hand {
   margin-top: auto;
   display: flex; flex-direction: column; align-items: center;
-  gap: 14px; padding: 20px 0 10px;
+  gap: 12px; padding: 14px 0 8px;
 }
 .hand-row { display: flex; justify-content: center; }
+/* Card size comes from --cw (set per hand by handStrip): big hands step
+   down a size so they hold to two short rows instead of three tall ones. */
 .hand-row .pcard {
-  width: 80px; height: 112px;
+  width: var(--cw, 80px); height: calc(var(--cw, 80px) * 1.4);
   transform: rotate(var(--rot, 0deg)) translateY(var(--lift, 0px));
 }
-.hand-row .pcard .r { font-size: 20px; }
-.hand-row .pcard + .pcard { margin-left: -36px; }
+.hand-row .pcard .r { font-size: calc(var(--cw, 80px) * .25); }
+.hand-row .pcard .s { font-size: calc(var(--cw, 80px) * .28); }
+.hand-row .pcard + .pcard { margin-left: calc(var(--cw, 80px) * -.45); }
 .hand-row .pcard.sel {
   transform: rotate(var(--rot, 0deg)) translateY(calc(var(--lift, 0px) - 26px));
   z-index: 2;
@@ -194,7 +197,7 @@ h2 { font-size: 20px; font-weight: 800; }
 /* Phone "table view": the TV's 2D table scene shrunk onto the phone. The
    inner box is a fixed logical canvas (sized + scaled inline by miniTable in
    app.js); the table gets margins inside it so the rim chips stay visible. */
-.mini-tv { overflow: hidden; margin-bottom: 10px; border-radius: 14px; }
+.mini-tv { overflow: hidden; border-radius: 14px; } /* sized + centered inline */
 .mini-tv-inner {
   transform-origin: top left;
   position: relative;
@@ -213,6 +216,10 @@ h2 { font-size: 20px; font-weight: 800; }
 .actionbar .tok { flex: 1; max-width: 200px; }
 
 .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+/* In-game header: the game is the screen below — the title shrinks to a
+   caption so the table, cards, and actions get the vertical room. */
+.topbar.game-top { margin-bottom: 8px; }
+.topbar.game-top h2 { font-size: 16px; }
 
 .banner {
   background: var(--raised); border-radius: var(--radius);
@@ -383,4 +390,12 @@ canvas.arcade { background: var(--felt-deep); border-radius: 18px; box-shadow: 0
 @media (max-width: 420px) {
   .game-grid { gap: 10px; }
   .tok { font-size: 16px; }
+  /* Small phones: the hub grid and in-game banners tighten up so a full
+     screen of games (or a game in progress) fits without scrolling. */
+  .game-tile { min-height: 132px; padding: 14px 12px; gap: 6px; }
+  .game-tile .g-icon { font-size: 40px; }
+  .game-tile .g-name { font-size: 17px; }
+  .game-tile .g-sub { font-size: 12px; }
+  .banner { padding: 10px 13px; font-size: 15px; }
+  .screen { padding-top: 14px; padding-bottom: 98px; }
 }

@@ -296,7 +296,9 @@ function lobbyScreen() {
 const MINI_W = 820, MINI_H = 440; // logical canvas, scaled to screen width
 function miniTable(mod, G) {
   const w = Math.min(window.innerWidth || 400, 560) - 32; // .screen padding
-  const k = w / MINI_W;
+  // Never let the table eat more than ~30% of a short screen — the phone's
+  // own controls (hand, actions) stay the main event.
+  const k = Math.min(w / MINI_W, ((window.innerHeight || 700) * 0.30) / MINI_H);
   const inner = h('div', {
     class: 'mini-tv-inner',
     style: `width:${MINI_W}px;height:${MINI_H}px;transform:scale(${k.toFixed(4)})`,
@@ -305,7 +307,10 @@ function miniTable(mod, G) {
     pub: G.pub, seats: G.seats, game: G,
     peeked: new Set(), padSeats: {}, privOf: () => null,
   });
-  return h('div', { class: 'mini-tv', style: `height:${Math.round(MINI_H * k)}px` }, inner);
+  return h('div', {
+    class: 'mini-tv',
+    style: `height:${Math.round(MINI_H * k)}px;width:${Math.round(MINI_W * k)}px;margin:0 auto 10px`,
+  }, inner);
 }
 
 function gameScreen() {
@@ -333,11 +338,14 @@ function gameScreen() {
   // Flex column so games spread over the whole phone screen — the fanned
   // hand (.hand, margin-top:auto) sinks to the bottom like held cards.
   const container = h('div', { style: 'flex:1;display:flex;flex-direction:column' });
+  const showTable = tableView && !!mod.tv?.render2d;
   const ctx = {
     sync, game: G, pub: G.pub, priv: G.priv, you: G.yourSeat, seats: G.seats,
     send: a => net.send({ t: 'act', a }),
     state: scratch, toast,
     rerender: render,
+    // The mini table is on-screen — games can skip re-stating what it shows.
+    tableShown: showTable,
     typing: () => container.contains(document.activeElement) && document.activeElement.tagName === 'INPUT',
   };
   if (mod.error || !mod.player) {
@@ -347,8 +355,8 @@ function gameScreen() {
   }
 
   return h('div', { class: 'screen', style: 'display:flex;flex-direction:column;min-height:100vh' },
-    h('div', { class: 'topbar' },
-      h('div', { class: 'row' }, h('span', { style: 'font-size:22px' }, g.icon), h('h2', {}, g.name)),
+    h('div', { class: 'topbar game-top' },
+      h('div', { class: 'row', style: 'gap:8px' }, h('span', { style: 'font-size:18px' }, g.icon), h('h2', {}, g.name)),
       h('div', { class: 'row' },
         G.yourSeat < 0 && h('span', { class: 'dim', style: 'font-size:13px' }, 'spectating'),
         mod.tv?.render2d && h('button', {
@@ -365,7 +373,7 @@ function gameScreen() {
           onclick: () => confirmQuit(),
         }, '💾 Exit'),
       )),
-    tableView && mod.tv?.render2d ? miniTable(mod, G) : null,
+    showTable ? miniTable(mod, G) : null,
     // dropped players / takeover
     G.seats.some(s => s.bot) && G.yourSeat < 0
       ? h('div', { class: 'banner', style: 'margin-bottom:10px;font-size:13px' },

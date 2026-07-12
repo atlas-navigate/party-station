@@ -58,14 +58,19 @@ export function handStrip(cards, { legal = null, selected = [], onTap, size = ''
   // Split the hand into near-equal rows sized to the phone width, then fan
   // each row like really held cards: every card tilts away from the row's
   // middle (--rot) and the edges droop slightly (--lift, along the card's
-  // own axis). Overlap step must match .hand-row's -36px card margin.
+  // own axis). Card width (--cw, consumed by .hand-row CSS — overlap is
+  // -.45 × width) steps down as the hand grows, so a big hand fans into two
+  // compact rows instead of stacking tall ones off the bottom of the screen.
   const usable = Math.min(window.innerWidth || 400, 560) - 48; // screen+hand padding
-  const cap = Math.max(4, Math.floor((usable - 80) / 44) + 1);
+  const capAt = w => Math.max(4, Math.floor((usable - w) / (w * 0.55)) + 1);
+  let cw = 80;
+  if (cards.length > capAt(80)) cw = cards.length > capAt(70) * 2 ? 62 : 70;
+  const cap = capAt(cw);
   const nRows = Math.max(1, Math.ceil(cards.length / cap));
   const per = Math.ceil(cards.length / nRows);
   const rows = [];
   for (let i = 0; i < cards.length; i += per) rows.push(cards.slice(i, i + per));
-  return h('div', { class: 'hand' }, rows.map(row => {
+  return h('div', { class: 'hand', style: `--cw:${cw}px` }, rows.map(row => {
     const mid = (row.length - 1) / 2;
     const tilt = Math.min(4, 26 / Math.max(row.length, 1));
     return h('div', { class: 'hand-row' }, row.map((c, i) => {

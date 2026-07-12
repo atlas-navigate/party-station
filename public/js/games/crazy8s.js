@@ -12,13 +12,17 @@ export const player = {
     const canPass = yourTurn && !priv.legal.length && (pub.drawn >= pub.maxDraws || !pub.deckCount);
 
     mount(el,
-      // flex:1 floats the discard/suit mid-screen; turn banner sits by your hand
-      h('div', { class: 'row', style: 'justify-content:center;gap:14px;margin:6px 0 4px;flex:1' },
-        cardEl(pub.top, { button: false }),
-        h('div', {},
-          h('div', { class: 'eyebrow' }, 'Suit'),
-          h('div', { style: `font-size:34px;color:${pub.suit === 'h' || pub.suit === 'd' ? '#ff5d73' : '#f2efe4'}` }, GLYPH[pub.suit])),
-      ),
+      // flex:1 floats the discard/suit mid-screen; turn banner sits by your
+      // hand. The mini table view shows the same discard + suit on the felt,
+      // so while it's up this block yields to a plain spacer.
+      ctx.tableShown
+        ? h('div', { style: 'flex:1' })
+        : h('div', { class: 'row', style: 'justify-content:center;gap:14px;margin:6px 0 4px;flex:1' },
+          cardEl(pub.top, { button: false }),
+          h('div', {},
+            h('div', { class: 'eyebrow' }, 'Suit'),
+            h('div', { style: `font-size:34px;color:${pub.suit === 'h' || pub.suit === 'd' ? '#ff5d73' : '#f2efe4'}` }, GLYPH[pub.suit])),
+        ),
       h('div', { class: 'banner center' + (yourTurn ? ' hot' : ''), style: 'margin-top:8px' },
         yourTurn ? 'Your turn' : `${seats[pub.turn]?.name}’s turn…`),
       handStrip(priv.hand, {

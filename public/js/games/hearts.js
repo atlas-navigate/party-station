@@ -60,7 +60,9 @@ export const player = {
         pub.sweep ? `🏆 ${sweepLine(pub, seats)}`
           : yourTurn ? 'Your turn — play a card' : `${seats[pub.turn]?.name}’s turn…`,
         pub.heartsBroken && !pub.sweep ? ' 💔' : ''));
-      if (pub.trick.length) {
+      // The mini table view already lays the trick out seat by seat — only
+      // repeat it here when that view is off.
+      if (pub.trick.length && !ctx.tableShown) {
         // flex:1 floats the trick mid-screen, between the banner and your hand
         kids.push(h('div', { class: 'row', style: 'justify-content:center;align-items:center;flex:1;margin-top:10px' },
           pub.trick.map(t => h('div', {
