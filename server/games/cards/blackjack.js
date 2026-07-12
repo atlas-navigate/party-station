@@ -1,6 +1,12 @@
 // Blackjack — everyone vs. the house dealer. Hit, stand, double.
 // Blackjack pays 3:2, dealer stands on all 17s. Bankrolls persist via autosave.
+// Cards land one at a time on a timer (phases 'deal' and 'dealer', driven by
+// pending()/tick() like hearts' trick sweep) so the round reads like a real
+// dealer working the shoe instead of everything appearing at once.
 import { freshDeck, rank, rv } from './util.js';
+
+const DEAL_MS = 400;    // one card off the shoe
+const DEALER_MS = 900;  // hole-card reveal beat + each dealer draw
 
 export const meta = {
   id: 'blackjack', name: 'Blackjack', tagline: 'Beat the dealer to 21', icon: '🂡', emoji: '♠️',
@@ -50,28 +56,40 @@ function startRound(st, n) {
 }
 
 function dealRound(st, n) {
+  // Two passes around the table, dealer last each pass; tick() lays down
+  // one card per entry (-1 = dealer) so everyone can watch the deal.
   const live = activeSeats(st, n).filter(i => st.bets[i] > 0);
-  for (let r = 0; r < 2; r++) {
-    for (const i of live) st.hands[i].push(drawCard(st));
-    st.dealer.push(drawCard(st));
-  }
+  st.phase = 'deal';
+  st.dealQueue = [...live, -1, ...live, -1];
+}
+
+function dealDone(st, n) {
+  const live = activeSeats(st, n).filter(i => st.bets[i] > 0);
   st.phase = 'play';
   for (const i of live) if (isBJ(st.hands[i])) st.done[i] = true;
-  if (isBJ(st.dealer)) { settle(st, n); return; }
+  // Dealer blackjack still passes through the 'dealer' phase: the hole card
+  // flips and lingers a beat before the payouts land.
+  if (isBJ(st.dealer)) { st.phase = 'dealer'; st.turn = -1; return; }
   nextPlayTurn(st, n);
 }
 
 function nextPlayTurn(st, n) {
   const live = activeSeats(st, n).filter(i => st.bets[i] > 0);
   st.turn = live.find(i => !st.done[i] && handValue(st.hands[i]) < 21) ?? -1;
-  if (st.turn === -1) {
-    // Everyone is set — dealer plays out immediately, then we settle.
-    if (live.some(i => handValue(st.hands[i]) <= 21 && !isBJ(st.hands[i]))
-      || live.some(i => isBJ(st.hands[i]))) {
-      while (handValue(st.dealer) < 17) st.dealer.push(drawCard(st));
-    }
-    settle(st, n);
+  // Everyone is set — reveal the hole card; tick() plays the dealer out
+  // one draw at a time, then settles.
+  if (st.turn === -1) st.phase = 'dealer';
+}
+
+function dealerStep(st, n) {
+  const live = activeSeats(st, n).filter(i => st.bets[i] > 0);
+  // Dealer only plays out against hands still standing (nobody left = no
+  // draws, straight to the payouts after the reveal beat).
+  if (live.some(i => handValue(st.hands[i]) <= 21) && handValue(st.dealer) < 17) {
+    st.dealer.push(drawCard(st));
+    return;
   }
+  settle(st, n);
 }
 
 function settle(st, n) {
@@ -103,12 +121,14 @@ function make(seats, options, st) {
   return {
     state: st,
     pub() {
-      const hideHole = st.phase === 'play';
+      // The hole card (dealer's second) stays face-down through the deal and
+      // everyone's turns; entering the 'dealer' phase is what flips it.
+      const hideHole = st.phase === 'deal' || st.phase === 'play';
       return {
         phase: st.phase, turn: st.turn, round: st.round,
         bank: st.bank, bets: st.bets,
         hands: st.hands, values: st.hands.map(h => h.length ? handValue(h) : null),
-        dealer: hideHole ? [st.dealer[0], 'back'] : st.dealer,
+        dealer: hideHole ? st.dealer.map((c, i) => (i === 0 ? c : 'back')) : st.dealer,
         dealerValue: hideHole ? null : (st.dealer.length ? handValue(st.dealer) : null),
         results: st.results, minBet: MIN_BET,
         sittingOut: st.bank.map(b => b < MIN_BET),
@@ -133,6 +153,23 @@ function make(seats, options, st) {
         return st.results.map((r, i) => r && !st.ready[i] ? i : null).filter(v => v != null);
       }
       return [];
+    },
+    // Timed table states (the lobby calls tick() after pending() ms while
+    // nobody is awaited): dealing and the dealer's playout, card by card.
+    pending() {
+      if (st.phase === 'deal') return DEAL_MS;
+      if (st.phase === 'dealer') return DEALER_MS;
+      return null;
+    },
+    tick() {
+      if (st.phase === 'deal') {
+        const who = st.dealQueue.shift();
+        if (who === -1) st.dealer.push(drawCard(st));
+        else st.hands[who].push(drawCard(st));
+        if (!st.dealQueue.length) { delete st.dealQueue; dealDone(st, n); }
+      } else if (st.phase === 'dealer') {
+        dealerStep(st, n);
+      }
     },
     act(seat, a) {
       if (st.phase === 'bet' && a.t === 'bet') {

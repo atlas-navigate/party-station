@@ -47,9 +47,11 @@ export const player = {
           h('button', { class: 'tok', onclick: () => send({ t: 'stand' }) }, 'Stand'),
           priv.canDouble && h('button', { class: 'tok danger', onclick: () => send({ t: 'double' }) }, '2×'),
         ));
-      } else if (pub.phase === 'play' && !ctx.tableShown) {
+      } else if ((pub.phase === 'play' || pub.phase === 'deal' || pub.phase === 'dealer') && !ctx.tableShown) {
         kids.push(h('div', { class: 'banner center', style: 'margin-top:10px' },
-          pub.turn === you ? '' : `${seats[pub.turn]?.name ?? 'Dealer'} is playing…`));
+          pub.phase === 'deal' ? 'Dealing…'
+            : pub.phase === 'dealer' ? 'Dealer’s turn…'
+              : pub.turn === you ? '' : `${seats[pub.turn]?.name ?? 'Dealer'} is playing…`));
       }
       if (pub.phase === 'payout') {
         // Your result is personal news, not table state — always shown.
