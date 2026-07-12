@@ -14,17 +14,24 @@ function logLine(e, seats) {
   }
 }
 
+const statusOf = (pub, you, seats) => you < 0 ? null
+  : pub.turn === you && pub.phase === 'play'
+    ? { text: 'Your turn — pick a rank, then who to ask', hot: true }
+    : { text: `${seats[pub.turn]?.name} is fishing…` };
+
 export const player = {
+  status: ctx => statusOf(ctx.pub, ctx.you, ctx.seats),
   render(el, ctx) {
     const { pub, priv, you, seats, send, state } = ctx;
     if (you < 0) { mount(el, h('p', { class: 'dim center' }, 'Watch the big screen!')); return; }
     const yourTurn = pub.turn === you && pub.phase === 'play';
     const myRanks = [...new Set(priv.hand.map(c => c[0]))];
     if (!myRanks.includes(state.rank)) state.rank = null;
+    const st = statusOf(pub, you, seats);
 
     mount(el,
-      h('div', { class: 'banner center' + (yourTurn ? ' hot' : '') },
-        yourTurn ? 'Your turn — pick a rank, then who to ask' : `${seats[pub.turn]?.name} is fishing…`),
+      ctx.tableShown ? null
+        : h('div', { class: 'banner center' + (st.hot ? ' hot' : '') }, st.text),
       handStrip(priv.hand, {
         legal: yourTurn ? priv.hand.filter(c => !state.rank || c[0] === state.rank) : null,
         selected: priv.hand.filter(c => c[0] === state.rank),

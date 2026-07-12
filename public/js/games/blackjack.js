@@ -2,7 +2,26 @@ import { h, mount, cardEl, tableEl, tv2d } from '../ui.js';
 
 const CHIP_VALUES = [10, 25, 50, 100];
 
+const statusOf = (pub, priv, you, seats) => {
+  if (you < 0 || !priv) return null;
+  if (pub.phase === 'bet') {
+    return priv.betting
+      ? { text: 'Place your bet', hot: true }
+      : { text: pub.bank[you] < pub.minBet ? 'You’re out of chips — spectating this round.' : 'Bet placed ✓ — waiting for the table…' };
+  }
+  if (pub.phase === 'payout') {
+    const r = pub.results[you];
+    return r
+      ? { text: `${r.label} ${r.delta > 0 ? '+' : ''}${r.delta}`, hot: r.delta > 0 }
+      : { text: 'Round over' };
+  }
+  return pub.turn === you
+    ? { text: 'Your move', hot: true }
+    : { text: `${seats[pub.turn]?.name ?? 'Dealer'} is playing…` };
+};
+
 export const player = {
+  status: ctx => statusOf(ctx.pub, ctx.priv, ctx.you, ctx.seats),
   render(el, ctx) {
     const { pub, priv, you, seats, send } = ctx;
     if (you < 0) { mount(el, h('p', { class: 'dim center' }, 'Watch the big screen!')); return; }
@@ -15,7 +34,7 @@ export const player = {
 
     if (pub.phase === 'bet') {
       if (priv.betting) {
-        kids.push(h('div', { class: 'banner hot center' }, 'Place your bet'));
+        if (!ctx.tableShown) kids.push(h('div', { class: 'banner hot center' }, 'Place your bet'));
         kids.push(h('div', { class: 'row wrap', style: 'justify-content:center;align-content:center;margin-top:14px;flex:1' },
           CHIP_VALUES.filter(v => v <= bank).map(v =>
             h('button', {
@@ -27,7 +46,7 @@ export const player = {
             onclick: () => send({ t: 'bet', amount: bank }),
           }, 'ALL IN'),
         ));
-      } else {
+      } else if (!ctx.tableShown) {
         kids.push(h('div', { class: 'banner center' },
           bank < pub.minBet ? 'You’re out of chips — spectating this round.' : 'Bet placed ✓ — waiting for the table…'));
       }
@@ -47,13 +66,13 @@ export const player = {
           h('button', { class: 'tok', onclick: () => send({ t: 'stand' }) }, 'Stand'),
           priv.canDouble && h('button', { class: 'tok danger', onclick: () => send({ t: 'double' }) }, '2×'),
         ));
-      } else if (pub.phase === 'play') {
+      } else if (pub.phase === 'play' && !ctx.tableShown) {
         kids.push(h('div', { class: 'banner center', style: 'margin-top:10px' },
           pub.turn === you ? '' : `${seats[pub.turn]?.name ?? 'Dealer'} is playing…`));
       }
       if (pub.phase === 'payout') {
         const r = pub.results[you];
-        if (r) {
+        if (r && !ctx.tableShown) {
           kids.push(h('div', { class: 'banner center ' + (r.delta > 0 ? 'hot' : ''), style: 'margin-top:10px;font-size:20px' },
             `${r.label} ${r.delta > 0 ? '+' : ''}${r.delta}`));
         }

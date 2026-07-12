@@ -4,12 +4,19 @@ const SUITS = [['s', '♠'], ['h', '♥'], ['d', '♦'], ['c', '♣']];
 const GLYPH = Object.fromEntries(SUITS);
 const NICE = c => (c[0] === 'T' ? '10' : c[0]) + GLYPH[c[1]];
 
+const statusOf = (pub, you, seats) => you < 0 ? null
+  : pub.turn === you && pub.phase === 'play'
+    ? { text: 'Your turn', hot: true }
+    : { text: `${seats[pub.turn]?.name}’s turn…` };
+
 export const player = {
+  status: ctx => statusOf(ctx.pub, ctx.you, ctx.seats),
   render(el, ctx) {
     const { pub, priv, you, seats, send } = ctx;
     if (you < 0) { mount(el, h('p', { class: 'dim center' }, 'Watch the big screen!')); return; }
     const yourTurn = pub.turn === you && pub.phase === 'play';
     const canPass = yourTurn && !priv.legal.length && (pub.drawn >= pub.maxDraws || !pub.deckCount);
+    const st = statusOf(pub, you, seats);
 
     mount(el,
       // flex:1 floats the discard/suit mid-screen; turn banner sits by your
@@ -23,8 +30,9 @@ export const player = {
             h('div', { class: 'eyebrow' }, 'Suit'),
             h('div', { style: `font-size:34px;color:${pub.suit === 'h' || pub.suit === 'd' ? '#ff5d73' : '#f2efe4'}` }, GLYPH[pub.suit])),
         ),
-      h('div', { class: 'banner center' + (yourTurn ? ' hot' : ''), style: 'margin-top:8px' },
-        yourTurn ? 'Your turn' : `${seats[pub.turn]?.name}’s turn…`),
+      ctx.tableShown ? null : h('div', {
+        class: 'banner center' + (st.hot ? ' hot' : ''), style: 'margin-top:8px',
+      }, st.text),
       handStrip(priv.hand, {
         legal: yourTurn ? priv.legal : [],
         onTap: c => {

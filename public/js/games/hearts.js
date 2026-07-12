@@ -15,11 +15,38 @@ const NICE = c => (c[0] === 'T' ? '10' : c[0]) + ({ s: '♠', h: '♥', d: '♦'
 const sweepLine = (pub, seats) =>
   `${seats[pub.sweep.winner]?.name} takes the trick${pub.sweep.pts ? ` (+${pub.sweep.pts})` : ''}`;
 
+// One status line for "what's happening / whose turn": the in-body banner
+// normally, the shell's top strip when the table view is up (player.status).
+const statusOf = (pub, priv, you, seats) => {
+  if (you < 0 || !priv) return null;
+  if (pub.phase === 'pass') {
+    if (!priv.passing) return { text: 'Cards passed ✓ — waiting for the others…' };
+    const to = passTarget(pub.dir, you, seats);
+    return { text: dirLabel(pub.dir, seats.length) + (to ? ` — to ${to}` : ''), hot: true };
+  }
+  if (pub.phase === 'roundEnd') {
+    return {
+      text: pub.shooter >= 0 ? `🌕 ${seats[pub.shooter]?.name} shot the moon!` : `Round ${pub.round} scores`,
+      hot: true,
+    };
+  }
+  const yourTurn = pub.turn === you && !pub.sweep;
+  return {
+    text: (pub.sweep ? `🏆 ${sweepLine(pub, seats)}`
+      : yourTurn ? 'Your turn — play a card' : `${seats[pub.turn]?.name}’s turn…`)
+      + (pub.heartsBroken && !pub.sweep ? ' 💔' : ''),
+    hot: yourTurn,
+  };
+};
+
 export const player = {
+  status: ctx => statusOf(ctx.pub, ctx.priv, ctx.you, ctx.seats),
   render(el, ctx) {
     const { pub, priv, you, seats, send, state } = ctx;
     if (you < 0) { mount(el, h('p', { class: 'dim center' }, 'Watch the big screen!')); return; }
     const kids = [];
+    const st = statusOf(pub, priv, you, seats);
+    const stBanner = () => h('div', { class: 'banner center' + (st.hot ? ' hot' : '') }, st.text);
 
     kids.push(h('div', { class: 'spread', style: 'margin-bottom:8px' },
       h('span', { class: 'numpill' }, `Round ${pub.round}`),
@@ -28,9 +55,7 @@ export const player = {
 
     if (pub.phase === 'pass' && priv.passing) {
       state.pick = state.pick || [];
-      const to = passTarget(pub.dir, you, seats);
-      kids.push(h('div', { class: 'banner hot center' },
-        dirLabel(pub.dir, seats.length), to ? ` — to ${to}` : ''));
+      if (!ctx.tableShown) kids.push(stBanner());
       kids.push(handStrip(priv.hand, {
         selected: state.pick,
         onTap: c => {
@@ -45,21 +70,17 @@ export const player = {
           onclick: () => { send({ t: 'pass', cards: state.pick }); state.pick = []; },
         }, `Pass ${state.pick.length}/3`)));
     } else if (pub.phase === 'pass') {
-      kids.push(h('div', { class: 'banner center' }, 'Cards passed ✓ — waiting for the others…'));
+      if (!ctx.tableShown) kids.push(stBanner());
       kids.push(handStrip(priv.hand, {}));
     } else if (pub.phase === 'roundEnd') {
-      kids.push(h('div', { class: 'banner hot center' },
-        pub.shooter >= 0 ? `🌕 ${seats[pub.shooter]?.name} shot the moon!` : `Round ${pub.round} scores`));
+      if (!ctx.tableShown) kids.push(stBanner());
       kids.push(h('div', { class: 'stack', style: 'flex:1;justify-content:center' },
         seats.map((s, i) => h('div', { class: 'spread', style: i === you ? 'font-weight:800' : '' },
           h('span', {}, s.name + (i === you ? ' (you)' : '')),
           h('span', { class: 'numpill' }, `+${pub.lastRound?.[i] ?? 0} → ${pub.scores[i]}`)))));
     } else {
       const yourTurn = pub.turn === you && !pub.sweep;
-      kids.push(h('div', { class: 'banner center' + (yourTurn ? ' hot' : '') },
-        pub.sweep ? `🏆 ${sweepLine(pub, seats)}`
-          : yourTurn ? 'Your turn — play a card' : `${seats[pub.turn]?.name}’s turn…`,
-        pub.heartsBroken && !pub.sweep ? ' 💔' : ''));
+      if (!ctx.tableShown) kids.push(stBanner());
       // The mini table view already lays the trick out seat by seat — only
       // repeat it here when that view is off.
       if (pub.trick.length && !ctx.tableShown) {

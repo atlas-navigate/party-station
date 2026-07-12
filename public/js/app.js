@@ -313,6 +313,21 @@ function miniTable(mod, G) {
   }, inner);
 }
 
+// With the table view up, whose-turn info lives at the very top of the
+// screen: the game's own status line if it provides one, else a generic
+// line from the server's awaiting list.
+function turnStrip(mod, ctx, G) {
+  let st = mod.player.status?.(ctx) || null;
+  if (!st) {
+    const a = G.awaiting || [];
+    if (!a.length) return null;
+    st = a.includes(G.yourSeat)
+      ? { text: 'Your turn', hot: true }
+      : { text: `${a.map(i => G.seats[i]?.name).filter(Boolean).join(', ')}${a.length > 1 ? ' are' : ' is'} up…` };
+  }
+  return h('div', { class: 'banner center turn-strip' + (st.hot ? ' hot' : '') }, st.text);
+}
+
 function gameScreen() {
   const G = sync.game;
   const g = sync.games.find(x => x.id === G.gameId);
@@ -373,6 +388,7 @@ function gameScreen() {
           onclick: () => confirmQuit(),
         }, '💾 Exit'),
       )),
+    showTable ? turnStrip(mod, ctx, G) : null,
     showTable ? miniTable(mod, G) : null,
     // dropped players / takeover
     G.seats.some(s => s.bot) && G.yourSeat < 0

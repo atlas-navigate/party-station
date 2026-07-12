@@ -149,12 +149,18 @@ export function tableEl(seats, { seatEl, inner, center } = {}) {
 
 export function chipEl(seat, opts = {}) {
   const initial = (seat.name || '?').trim()[0]?.toUpperCase() || '?';
+  // extra sits in its own span so contexts can restack it: inline after the
+  // name normally (a CSS "· " joins them), under the name in the phone's
+  // mini table where rim space is tight.
+  const extra = (opts.extra || '').replace(/^·\s*/, '');
   return h('div', {
     class: 'chip' + (seat.bot ? ' bot' : '') + (opts.turn ? ' turn' : '')
       + (seat.connected === false ? ' off' : ''),
   },
     h('span', { class: 'dot' }, seat.bot ? '🤖' : initial),
-    h('span', {}, seat.name + (opts.extra ? ` ${opts.extra}` : '')),
+    h('span', { class: 'chip-txt' },
+      h('span', {}, seat.name),
+      extra ? h('span', { class: 'chip-sub' }, extra) : null),
   );
 }
 

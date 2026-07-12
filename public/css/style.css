@@ -133,6 +133,14 @@ h2 { font-size: 20px; font-weight: 800; }
   display: inline-flex; align-items: center; justify-content: center;
   background: var(--raised-2); font-size: 13px;
 }
+.chip-txt { display: flex; align-items: center; gap: 5px; }
+.chip-sub::before { content: '· '; }
+/* Mini table rim chips: points stack under the name — narrow beats wide
+   around a shrunken felt. */
+.mini-tv .chip { padding: 6px 12px 6px 7px; }
+.mini-tv .chip-txt { flex-direction: column; align-items: flex-start; gap: 0; line-height: 1.2; }
+.mini-tv .chip-sub { font-size: 14px; color: var(--chalk-dim); font-weight: 700; }
+.mini-tv .chip-sub::before { content: none; }
 .chip.bot .dot { background: var(--arcade); color: #1d1033; }
 .chip.off { opacity: .45; }
 .chip.turn { box-shadow: 0 3px 0 var(--marquee-edge), 0 0 18px #ffb52e55; background: #3a3145; }
@@ -198,6 +206,8 @@ h2 { font-size: 20px; font-weight: 800; }
    inner box is a fixed logical canvas (sized + scaled inline by miniTable in
    app.js); the table gets margins inside it so the rim chips stay visible. */
 .mini-tv { overflow: hidden; border-radius: 14px; } /* sized + centered inline */
+/* Whose-turn line pinned above the mini table — one compact row. */
+.turn-strip { padding: 8px 12px; font-size: 14px; margin-bottom: 6px; }
 .mini-tv-inner {
   transform-origin: top left;
   position: relative;
@@ -398,4 +408,5 @@ canvas.arcade { background: var(--felt-deep); border-radius: 18px; box-shadow: 0
   .game-tile .g-sub { font-size: 12px; }
   .banner { padding: 10px 13px; font-size: 15px; }
   .screen { padding-top: 14px; padding-bottom: 98px; }
+  .hand { padding: 8px 0 6px; }
 }

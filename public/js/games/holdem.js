@@ -2,7 +2,21 @@ import { h, mount, cardEl, sheet, tableEl, tv2d } from '../ui.js';
 
 const STREETS = ['Pre-flop', 'Flop', 'Turn', 'River'];
 
+const statusOf = (pub, priv, you, seats) => {
+  if (you < 0 || !priv) return null;
+  if (pub.busted[you]) return { text: 'You busted out — spectating. 💀' };
+  if (pub.phase === 'payout') {
+    const won = pub.results?.pots?.filter(p => p.winners.includes(you))
+      .reduce((a, p) => a + p.amount, 0) || 0;
+    return won ? { text: `You win ${won}! 🎉`, hot: true } : { text: 'Hand over.' };
+  }
+  if (!pub.inHand[you]) return { text: 'Folded — waiting for the next hand.' };
+  if (priv.yourTurn) return { text: priv.toCall > 0 ? `${priv.toCall} to call` : 'Your action', hot: true };
+  return { text: pub.turn >= 0 ? `${seats[pub.turn]?.name} is thinking…` : 'Dealing…' };
+};
+
 export const player = {
+  status: ctx => statusOf(ctx.pub, ctx.priv, ctx.you, ctx.seats),
   render(el, ctx) {
     const { pub, priv, you, seats, send } = ctx;
     if (you < 0) { mount(el, h('p', { class: 'dim center' }, 'Watch the big screen!')); return; }
@@ -14,7 +28,7 @@ export const player = {
       h('span', { class: 'dim' }, `Hand #${pub.handNum} · Pot ${pub.pot}`)));
 
     if (pub.busted[you]) {
-      kids.push(h('div', { class: 'banner center' }, 'You busted out — spectating. 💀'));
+      if (!ctx.tableShown) kids.push(h('div', { class: 'banner center' }, 'You busted out — spectating. 💀'));
       mount(el, ...kids); return;
     }
 
@@ -26,11 +40,13 @@ export const player = {
 
     if (pub.phase === 'hand') {
       if (!pub.inHand[you]) {
-        kids.push(h('div', { class: 'banner center' }, 'Folded — waiting for the next hand.'));
+        if (!ctx.tableShown) kids.push(h('div', { class: 'banner center' }, 'Folded — waiting for the next hand.'));
       } else if (priv.yourTurn) {
         const toCall = priv.toCall;
-        kids.push(h('div', { class: 'banner hot center' },
-          toCall > 0 ? `${toCall} to call` : 'Your action'));
+        if (!ctx.tableShown) {
+          kids.push(h('div', { class: 'banner hot center' },
+            toCall > 0 ? `${toCall} to call` : 'Your action'));
+        }
         kids.push(h('div', { class: 'actionbar' },
           h('button', { class: 'tok danger', onclick: () => send({ t: 'fold' }) }, 'Fold'),
           toCall > 0
@@ -40,16 +56,20 @@ export const player = {
           stack > toCall && h('button', { class: 'tok', onclick: () => raiseSheet(pub, priv, you, send) }, 'Raise'),
         ));
       } else {
-        kids.push(h('div', { class: 'banner center' },
-          pub.turn >= 0 ? `${seats[pub.turn]?.name} is thinking…` : 'Dealing…'));
+        if (!ctx.tableShown) {
+          kids.push(h('div', { class: 'banner center' },
+            pub.turn >= 0 ? `${seats[pub.turn]?.name} is thinking…` : 'Dealing…'));
+        }
         if (pub.allin[you]) kids.push(h('div', { class: 'center dim', style: 'margin-top:8px' }, 'You’re all in! 🚀'));
       }
     }
     if (pub.phase === 'payout') {
       const r = pub.results;
       const won = r?.pots?.filter(p => p.winners.includes(you)).reduce((a, p) => a + p.amount, 0) || 0;
-      kids.push(h('div', { class: 'banner center' + (won ? ' hot' : ''), style: 'margin-top:8px' },
-        won ? `You win ${won}! 🎉` : 'Hand over.'));
+      if (!ctx.tableShown) {
+        kids.push(h('div', { class: 'banner center' + (won ? ' hot' : ''), style: 'margin-top:8px' },
+          won ? `You win ${won}! 🎉` : 'Hand over.'));
+      }
       kids.push(h('div', { class: 'actionbar' },
         h('button', { class: 'tok primary big', onclick: () => send({ t: 'next' }) }, 'Next hand →')));
     }
