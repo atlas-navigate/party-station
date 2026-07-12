@@ -168,6 +168,23 @@ function sniffUnsupported(entries) {
   return null;
 }
 
+// Arcade-set zips all look alike from outside, but the boards leave
+// fingerprints in the entry names: CPS-2 sets carry a QSound .key file,
+// CPS-3 games are SIMM flash dumps, and Neo Geo chunks use .p1/.c1/.v1/…
+// extensions. No fingerprint (CPS-1, plain MAME — romset versions are
+// truly indistinguishable) stays on the main Arcade shelf, and the /roms
+// page can move any wrong guess by hand.
+export function arcadeBoard(entries) {
+  let neo = 0;
+  for (const e of entries || []) {
+    const base = path.basename(e.name).toLowerCase();
+    if (base.endsWith('.key')) return 'cps2';
+    if (/simm\d/.test(base)) return 'cps3';
+    if (/\.[pcsvm]\d+$/.test(base)) neo++;
+  }
+  return neo >= 3 ? 'neogeo' : null;
+}
+
 export function sniffZipSystem(file) {
   return sniffEntries(zipEntries(file));
 }
@@ -342,7 +359,10 @@ export function library() {
             return { file: f, size };
           });
       } catch {}
-      return { id: s.id, name: s.name, icon: s.icon, ext: s.ext, ready: coreAvailable(s.id), files };
+      return {
+        id: s.id, name: s.name, icon: s.icon, ext: s.ext,
+        ready: coreAvailable(s.id), manual: s.manual || undefined, files,
+      };
     }),
   };
 }
@@ -367,6 +387,13 @@ function routeIncoming(file, siblings, src) {
     if (hasCue) return 'psx';
   }
   if (ext === '.iso') return isoSystem(src);
+  // Arcade zips: the entry names can reveal the board (CPS-2/3, Neo Geo);
+  // otherwise the main Arcade shelf is the default. neogeo.zip is the Neo
+  // Geo BIOS — FBNeo wants it on that shelf, next to the games.
+  if (ext === '.zip') {
+    if (file.toLowerCase() === 'neogeo.zip') return 'neogeo';
+    return arcadeBoard(zipEntries(src)) || routeFor(file);
+  }
   return routeFor(file);
 }
 
@@ -614,6 +641,15 @@ export function romsRouter({ onChange }) {
           // Couldn't unpack — at least park the zip with the right system.
           finalSystem = sniffed;
           finalDest = path.join(destDirFor(sniffed), name);
+        } else if (wanted === 'auto') {
+          // A true arcade set — the entry names may reveal the board
+          // (CPS-2/3, Neo Geo); an explicit system choice always wins.
+          // neogeo.zip is the Neo Geo BIOS: FBNeo wants it on that shelf.
+          const board = name.toLowerCase() === 'neogeo.zip' ? 'neogeo' : arcadeBoard(entries);
+          if (board && systemDir(board)) {
+            finalSystem = board;
+            finalDest = path.join(systemDir(board), name);
+          }
         }
       } else if (!isBios && wanted === 'auto' && path.extname(name).toLowerCase() === '.iso') {
         // Auto-routed .iso streamed toward psx/ — the bytes decide PS1 vs PSP vs PS2.
@@ -635,6 +671,33 @@ export function romsRouter({ onChange }) {
       res.json({ ok: true, system: finalSystem, file: name, size: written });
     });
     req.pipe(out);
+  });
+
+  // POST /api/roms/move {from, to, file} — manual re-route for when the
+  // automatic router guessed the wrong shelf (MAME romset versions are
+  // indistinguishable from outside the zip, so wrong guesses happen).
+  router.post('/move', express.json(), (req, res) => {
+    const { from, to } = req.body || {};
+    const name = cleanName(req.body?.file);
+    const src = systemDir(from);
+    const dst = to === 'bios' ? BIOS_DIR : systemDir(to);
+    if (!src || !dst || !name || from === to) {
+      return res.status(400).json({ err: 'Bad system or file name' });
+    }
+    const a = path.join(src, name);
+    const b = path.join(dst, name);
+    if (!a.startsWith(src + path.sep) || !b.startsWith(dst + path.sep)) {
+      return res.status(400).json({ err: 'Bad path' });
+    }
+    try {
+      fs.mkdirSync(dst, { recursive: true });
+      fs.renameSync(a, b);
+    } catch (e) {
+      return res.status(404).json({ err: 'Could not move: ' + e.message });
+    }
+    console.log(`roms: moved ${from}/${name} → ${to}/`);
+    onChange?.();
+    res.json({ ok: true, system: to });
   });
 
   router.delete('/:system/:file', (req, res) => {

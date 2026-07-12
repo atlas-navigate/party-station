@@ -257,6 +257,60 @@ if (alice.sync.emu?.available) {
   if (r.system !== 'pcengine') throw new Error('.pce did not route to pcengine: ' + JSON.stringify(r));
   ok('Master System and TurboGrafx route by extension');
 
+  // Arcade boards route by what's inside the zip: CPS-2 sets carry a QSound
+  // .key, CPS-3 games are SIMM dumps, Neo Geo chunks use .p1/.c1/… names.
+  // An explicit shelf choice beats the guess, and neogeo.zip is the BIOS.
+  const multiZip = files => { // [[name, data], …] — stored entries only
+    const parts = [], cds = [];
+    let off = 0;
+    for (const [nm, raw] of files) {
+      const nameBuf = Buffer.from(nm), data = Buffer.from(raw);
+      const lfh = Buffer.alloc(30);
+      lfh.writeUInt32LE(0x04034b50, 0); lfh.writeUInt16LE(20, 4);
+      lfh.writeUInt32LE(data.length, 18); lfh.writeUInt32LE(data.length, 22);
+      lfh.writeUInt16LE(nameBuf.length, 26);
+      parts.push(lfh, nameBuf, data);
+      const cdh = Buffer.alloc(46);
+      cdh.writeUInt32LE(0x02014b50, 0); cdh.writeUInt16LE(20, 6);
+      cdh.writeUInt32LE(data.length, 20); cdh.writeUInt32LE(data.length, 24);
+      cdh.writeUInt16LE(nameBuf.length, 28);
+      cdh.writeUInt32LE(off, 42);
+      cds.push(Buffer.concat([cdh, nameBuf]));
+      off += 30 + nameBuf.length + data.length;
+    }
+    const cd = Buffer.concat(cds);
+    const eocd = Buffer.alloc(22);
+    eocd.writeUInt32LE(0x06054b50, 0);
+    eocd.writeUInt16LE(files.length, 8); eocd.writeUInt16LE(files.length, 10);
+    eocd.writeUInt32LE(cd.length, 12); eocd.writeUInt32LE(off, 16);
+    return Buffer.concat([...parts, cd, eocd]);
+  };
+  r = await (await upload('mvsc test.zip', 'auto', zipOf('mvsc.key', Buffer.from('QSOUNDKEY')))).json();
+  if (r.system !== 'cps2') throw new Error('.key zip did not route to cps2: ' + JSON.stringify(r));
+  r = await (await upload('sfiii3 test.zip', 'auto', zipOf('sfiii3-simm1.0', Buffer.from('SIMMDATA')))).json();
+  if (r.system !== 'cps3') throw new Error('simm zip did not route to cps3: ' + JSON.stringify(r));
+  r = await (await upload('mslug test.zip', 'auto',
+    multiZip([['201-p1.p1', 'P'], ['201-c1.c1', 'C'], ['201-v1.v1', 'V']]))).json();
+  if (r.system !== 'neogeo') throw new Error('Neo Geo chunk zip did not route to neogeo: ' + JSON.stringify(r));
+  r = await (await upload('neogeo.zip', 'auto', zipOf('sp-s2.sp1', Buffer.from('NEOBIOS')))).json();
+  if (r.system !== 'neogeo') throw new Error('neogeo.zip (BIOS) did not route to neogeo: ' + JSON.stringify(r));
+  r = await (await upload('forced.zip', 'arcade', zipOf('mvsc.key', Buffer.from('QSOUNDKEY')))).json();
+  if (r.system !== 'arcade') throw new Error('explicit shelf choice should beat the board sniff: ' + JSON.stringify(r));
+  ok('arcade zips route by board fingerprint (CPS-2/3, Neo Geo; explicit wins)');
+
+  // Manual move: relocates a filed ROM when the router guessed wrong.
+  r = await (await fetch(`${base}/api/roms/move`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ from: 'arcade', to: 'mame2010', file: 'forced.zip' }),
+  })).json();
+  if (!r.ok || r.system !== 'mame2010') throw new Error('move API failed: ' + JSON.stringify(r));
+  const libMv = await (await fetch(`${base}/api/roms`)).json();
+  if (!libMv.systems.find(s => s.id === 'mame2010').files.some(f => f.file === 'forced.zip')
+    || libMv.systems.find(s => s.id === 'arcade').files.some(f => f.file === 'forced.zip')) {
+    throw new Error('moved ROM not in mame2010/ (or still in arcade/)');
+  }
+  ok('manual move relocates a ROM between shelves');
+
   // PS1 .iso dumps: routed bare, and unpacked out of zips.
   r = await (await upload('Blitz Port (USA).iso')).json();
   if (r.system !== 'psx') throw new Error('.iso did not route to psx: ' + JSON.stringify(r));
@@ -313,15 +367,17 @@ if (alice.sync.emu?.available) {
     fs.mkdirSync(inc, { recursive: true });
     fs.writeFileSync(path.join(inc, 'Dropped Game.nes'), 'fake-nes');
     fs.writeFileSync(path.join(inc, 'Dropped UMD.iso'), 'iso-junk PSP_GAME iso-junk');
+    fs.writeFileSync(path.join(inc, 'Dropped CPS2.zip'), zipOf('dropped.key', Buffer.from('QSOUNDKEY')));
     const deadline2 = Date.now() + 15000;
     let sorted = false;
     while (Date.now() < deadline2) {
       if (fs.existsSync(path.join(romsDir, 'nes', 'Dropped Game.nes'))
-        && fs.existsSync(path.join(romsDir, 'psp', 'Dropped UMD.iso'))) { sorted = true; break; }
+        && fs.existsSync(path.join(romsDir, 'psp', 'Dropped UMD.iso'))
+        && fs.existsSync(path.join(romsDir, 'cps2', 'Dropped CPS2.zip'))) { sorted = true; break; }
       await sleep(200);
     }
-    if (!sorted) throw new Error('incoming/ files were not sorted into nes/ and psp/');
-    ok('scp incoming folder sorts ROMs automatically (incl. PSP iso by contents)');
+    if (!sorted) throw new Error('incoming/ files were not sorted into nes/, psp/ and cps2/');
+    ok('scp incoming folder sorts ROMs automatically (PSP iso + CPS-2 zip by contents)');
   }
 
   for (const [sys, file] of [['snes', 'Super Test (USA).sfc'], ['arcade', 'coinop.zip'],
@@ -333,7 +389,10 @@ if (alice.sync.emu?.available) {
                              ['mastersystem', 'Sonic Test (USA).sms'], ['pcengine', 'Bonk Test (USA).pce'],
                              ['gbc', 'Stale Page.gbc'], ['psp', 'Ridge Test (USA).iso'],
                              ['psp', 'Ridge Test (USA).cso'], ['psp', 'Zipped PSP.iso'],
-                             ['psp', 'Dropped UMD.iso']]) {
+                             ['psp', 'Dropped UMD.iso'],
+                             ['cps2', 'mvsc test.zip'], ['cps3', 'sfiii3 test.zip'],
+                             ['neogeo', 'mslug test.zip'], ['neogeo', 'neogeo.zip'],
+                             ['mame2010', 'forced.zip'], ['cps2', 'Dropped CPS2.zip']]) {
     await fetch(`${base}/api/roms/${sys}/${encodeURIComponent(file)}`, { method: 'DELETE' });
   }
   const lib2 = await (await fetch(`${base}/api/roms`)).json();

@@ -50,7 +50,7 @@ export const SYSTEMS = [
   // PS2 has no RetroPie-packaged core; the slot lights up if a core (Play!
   // needs no BIOS; LRPS2 wants one) is dropped in. Fair warning: a Pi 4
   // runs most PS2 discs far below full speed — this is a "try it" shelf.
-  { id: 'ps2', name: 'PlayStation 2', icon: '💿', cores: ['play_libretro.so', 'pcsx2_libretro.so'], ext: ['.iso', '.chd', '.cso', '.elf'] },
+  { id: 'ps2', name: 'PlayStation 2', icon: '💿', cores: ['play_libretro.so', 'pcsx2_libretro.so'], ext: ['.iso', '.chd', '.cso', '.elf'], manual: true },
   { id: 'n64', name: 'Nintendo 64', icon: '🎮', cores: ['mupen64plus_next_libretro.so', 'parallel_n64_libretro.so'], ext: ['.z64', '.n64', '.v64'] },
   { id: 'gba', name: 'Game Boy Advance', icon: '🎮', cores: ['mgba_libretro.so', 'gpsp_libretro.so'], ext: ['.gba'] },
   { id: 'atari2600', name: 'Atari 2600', icon: '🕹️', cores: ['stella2014_libretro.so', 'stella_libretro.so'], ext: ['.a26'] },
