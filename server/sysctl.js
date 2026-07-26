@@ -54,8 +54,13 @@ export function run(args, { stdin } = {}) {
         }
         if (err) {
           if (err.killed) { reject(new Error('That took too long and was stopped.')); return; }
-          const hint = /sudo|password/i.test(String(stderr || ''))
-            ? 'The helper is installed but not permitted — re-run the setup script.'
+          // Always log what actually went wrong: the message below is a
+          // friendly summary, and without the real stderr a misconfigured
+          // unit file is very hard to tell apart from a missing sudoers rule.
+          console.error('sysctl:', args.join(' '), '->', String(stderr || err.message).trim());
+          const hint = /sudo|password|not allowed|no new privileges/i.test(String(stderr || ''))
+            ? 'The helper isn’t permitted to run — check /etc/sudoers.d/party-station '
+              + 'and that the service unit sets neither NoNewPrivileges nor a CapabilityBoundingSet.'
             : 'The system helper failed.';
           reject(new Error(hint));
           return;
