@@ -9,7 +9,7 @@ automatically so you can pick them up next game night.
 
 ## The games
 
-🃏 **Cards:** Hearts · Crazy 8s · Texas Hold'em · Blackjack · Go Fish
+🃏 **Cards:** Hearts · Crazy 8s · Texas Hold'em · Blackjack · Go Fish · Spite &amp; Malice
 
 ## How it plays
 
@@ -103,11 +103,62 @@ TV, Fire stick, or a laptop plugged into the TV instead.
 
 > **Pi 4 (2GB) note:** the server itself is tiny and the TV view is plain
 > DOM — no WebGL required. Keep the kiosk to its one Chromium tab — that's
-> the normal setup and fits in 2GB.
+> the normal setup and fits in 2GB. The one thing a Pi 4 genuinely can't do
+> is drive a **4K** screen, which is why the installer caps HDMI output at
+> 1080p — see [Display](#display).
 
 Android phones resolve `.local` names in modern versions; if a device can't,
-use the Pi's IP address (shown in the app's Settings sheet and in
-`journalctl -u party-station`).
+use the Pi's IP address. The TV shows it on every screen, it's on the
+Settings page, and it's in `journalctl -u party-station`.
+
+## Settings
+
+Wi-Fi and display live on their own screen, reachable two ways:
+
+- **On the TV** — pick **⚙️ Settings** on the landing screen (or press
+  **Ctrl+Alt+S** on a keyboard plugged into the Pi). Everything is driven by
+  the d-pad, including an on-screen keyboard for Wi-Fi passwords.
+- **On a phone** — ⚙️ in the app, then **📶 Network & display**, or go
+  straight to `http://party-station.local/settings`.
+
+**Changing the network while travelling.** Scan, pick a network, type the
+password. The station drops off the old network while it switches, so the
+phone you did it from will lose the page for a moment — that's expected. If
+the password is wrong or the network doesn't answer, **the station puts
+itself back on the previous network** rather than stranding itself somewhere
+unreachable. Once it's joined, the TV shows the new address to read out to
+guests.
+
+Hotel and café networks with a sign-in page are the one case this can't
+finish: joining works, but the portal still has to be accepted in a browser
+on the Pi itself.
+
+> **Who's allowed.** The TV screen needs no code — being in front of the
+> television is the point. A phone has to type a **4-digit code that only
+> appears on the TV**, so a stranger who finds the box on a shared network
+> can't re-point it. Saved Wi-Fi passwords are never sent back to any
+> browser. If no TV is connected, the code is also written to
+> `journalctl -u party-station`.
+
+## Display
+
+**The installer caps HDMI output at 1920×1080.** A Pi 4 can't drive a 4K
+desktop: at 2160p the menus crawl and emulator audio breaks up — the sound
+problem is really the video problem, because RetroArch clocks its audio off a
+video signal that can't hold 60fps, so dropped frames come out as crackle and
+pitch drift.
+
+The cap is a `video=` kernel parameter in `cmdline.txt`, which constrains
+everything downstream — the boot console, the kiosk, and RetroArch alike.
+Switch between **1080p** and **Native** on the Settings screen; the change
+needs a reboot, and the screen offers one. To install without the cap:
+
+```bash
+curl -fsSL .../install.sh | sudo FORCE_1080P=0 bash
+```
+
+Both are reversible at any time from Settings, and the original `cmdline.txt`
+is kept next to it as `cmdline.txt.party-station.bak`.
 
 ## Sound
 
@@ -264,3 +315,11 @@ controls. Bluetooth controllers are read by the TV via the Gamepad API and
 act through server-side "pad player" records that live on the TV's
 connection — so pads and phones are interchangeable seats. State snapshots
 land in `data/saves/*.json` after every action, debounced.
+
+Anything needing root (Wi-Fi, the display mode) goes through one small
+root-owned helper — `scripts/psctl`, installed as
+`/usr/local/sbin/party-station-ctl` and reachable via a sudoers rule scoped
+to exactly that path. It takes a fixed set of subcommands and answers in
+JSON. It lives outside the app directory on purpose: the app user and the
+self-updater's `git reset --hard` can both rewrite the repo, so a sudoers
+rule pointing there would effectively be a root shell.

@@ -164,6 +164,47 @@ cd "$APP_DIR"
 npm install --omit=dev --no-audit --no-fund >/dev/null
 chown -R "$RUN_USER":"$RUN_USER" "$APP_DIR"
 
+# ── Privileged helper: the one root door the game server is allowed through ──
+# Wi-Fi switching and the display cap need root. The server runs unprivileged,
+# so it shells out to this single script via a scoped sudoers rule. The copy
+# lives here, NOT in $APP_DIR: the app user and the self-updater's
+# `git reset --hard` can both rewrite the repo, so pointing sudoers at it would
+# hand out root. Keep this path root-owned and non-writable by $RUN_USER.
+PSCTL=/usr/local/sbin/party-station-ctl
+echo "==> Installing the privileged helper (${PSCTL})…"
+install -o root -g root -m 0755 "$APP_DIR/scripts/psctl" "$PSCTL"
+
+SUDOERS=/etc/sudoers.d/party-station
+SUDOERS_TMP="$(mktemp)"
+cat > "$SUDOERS_TMP" <<EOF
+# Party Station: lets the game server change Wi-Fi and the display mode.
+# Exactly one root-owned binary with a fixed set of subcommands — see
+# scripts/psctl in the Party Station repo.
+${RUN_USER} ALL=(root) NOPASSWD: ${PSCTL}
+EOF
+if visudo -cf "$SUDOERS_TMP" >/dev/null 2>&1; then
+  install -o root -g root -m 0440 "$SUDOERS_TMP" "$SUDOERS"
+else
+  echo "    ⚠️  Generated sudoers rule failed validation — skipping."
+  echo "       Wi-Fi and display settings will be read-only in the app."
+fi
+rm -f "$SUDOERS_TMP"
+
+# ── Cap HDMI output at 1080p (skip with FORCE_1080P=0) ──
+# A Pi 4 cannot drive a 4K desktop: the kiosk crawls and emulator audio breaks
+# up, because RetroArch clocks its audio off a video signal that can't hold
+# 60fps at 2160p. Capping the mode fixes both. Deliberately at top level and
+# not inside the kiosk block below — a box installed with SETUP_KIOSK=0 still
+# runs emulators on the TV and still needs the cap.
+if [ "${FORCE_1080P:-1}" != "0" ] && [ -x "$PSCTL" ]; then
+  if grep -qi "raspberry pi" /proc/device-tree/model 2>/dev/null; then
+    echo "==> Capping HDMI output at 1080p (FORCE_1080P=0 to keep native)…"
+    "$PSCTL" display-set 1080p >/dev/null 2>&1 \
+      && echo "    Output capped at 1920x1080 — takes effect after a reboot." \
+      || echo "    ⚠️  Could not write the display setting; leaving it alone."
+  fi
+fi
+
 echo "==> Installing systemd service…"
 sed -e "s|__USER__|${RUN_USER}|" -e "s|__APP_DIR__|${APP_DIR}|" \
   "$APP_DIR/systemd/party-station.service" > /etc/systemd/system/party-station.service
@@ -217,7 +258,7 @@ if [ "${SETUP_KIOSK:-1}" != "0" ]; then
         pacman)  EMOJI_PKGS="noto-fonts-emoji" ;;
         zypper)  EMOJI_PKGS="noto-coloremoji-fonts" ;;
       esac
-      for p in $EMOJI_PKGS wlrctl xdotool; do
+      for p in $EMOJI_PKGS wlrctl xdotool wlr-randr; do
         pkg_install "$p" >/dev/null 2>&1 || true
       done
 

@@ -1,9 +1,10 @@
 // Party Station console shell (the TV is the console screen).
 // All games render here in 3D; phones and Bluetooth controllers drive it.
 import { connect } from './net.js';
-import { h, mount, toast } from './ui.js';
+import { h, mount, toast, newOsk, oskNav, oskEl } from './ui.js';
 import { createPads } from './pads.js';
 import { sfx } from './sfx.js';
+import * as S from './settings-core.js';
 
 const root = document.getElementById('tv');
 document.body.classList.add('tv');
@@ -13,9 +14,10 @@ const modules = {};
 let scene = null;          // { gameId, key, api } for mounted 3D scenes
 let relaySim = null;
 let hubCursor = 0;
-// Landing choice: null (asking) | 'party' | 'retro'. /tv?mode=retro skips
-// the chooser — handy for debugging a hub without a controller in hand.
-let tvMode = ['party', 'retro'].includes(new URLSearchParams(location.search).get('mode'))
+// Landing choice: null (asking) | 'party' | 'retro' | 'settings'.
+// /tv?mode=retro skips the chooser — handy for debugging a hub without a
+// controller in hand.
+let tvMode = ['party', 'retro', 'settings'].includes(new URLSearchParams(location.search).get('mode'))
   ? new URLSearchParams(location.search).get('mode') : null;
 let chooseIdx = 0;         // focused tile on the landing chooser
 const menus = new Map();   // pad index -> {seat, stage, idx, spec}
@@ -65,7 +67,32 @@ window.addEventListener('keydown', e => {
   } else if (k === 'r') {
     e.preventDefault();
     location.reload();
+  } else if (k === 's') {
+    // Settings without a controller in hand.
+    e.preventDefault();
+    if (sync?.phase === 'hub' && !sync.emulator) {
+      tvMode = 'settings';
+      openSettings();
+      render();
+    } else {
+      toast('Finish the game first, then press Ctrl+Alt+S from the hub.');
+    }
   }
+});
+
+// A keyboard on the TV should drive the settings screen too — the same
+// handlers the d-pad uses, so the two can never disagree.
+window.addEventListener('keydown', e => {
+  if (e.ctrlKey || e.altKey || e.metaKey) return;
+  if (sync?.phase !== 'hub' || tvMode !== 'settings') return;
+  const map = {
+    ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
+    Enter: 'a', Escape: 'b', Backspace: 'x', Tab: 'y', ' ': 'lb',
+  };
+  const btn = map[e.key];
+  if (!btn) return;
+  e.preventDefault();
+  padSettings(btn);
 });
 
 async function loadModule(id) {
@@ -136,18 +163,21 @@ function retroLayout() {
 function hubList() { return hubGroups().flat(); }
 
 function padHub(pad, btn) {
-  // Landing chooser: pick between party games and the retro cabinet.
+  // Landing chooser: party games, the retro cabinet, or the settings screen.
   if (tvMode === null) {
-    if (btn === 'left' || btn === 'up') { chooseIdx = 0; sfx.blip(); }
-    if (btn === 'right' || btn === 'down') { chooseIdx = 1; sfx.blip(); }
+    const modes = chooseModes();
+    if (btn === 'left' || btn === 'up') { chooseIdx = (chooseIdx + modes.length - 1) % modes.length; sfx.blip(); }
+    if (btn === 'right' || btn === 'down') { chooseIdx = (chooseIdx + 1) % modes.length; sfx.blip(); }
     if (btn === 'a' || btn === 'start' || btn === 'x') {
-      tvMode = chooseIdx === 1 ? 'retro' : 'party';
+      tvMode = modes[chooseIdx];
       hubCursor = 0;
+      if (tvMode === 'settings') openSettings();
       sfx.select();
     }
     render();
     return;
   }
+  if (tvMode === 'settings') return padSettings(btn);
   if (btn === 'b') { tvMode = null; sfx.back(); render(); return; }
   const groups = hubGroups();
   const list = groups.flat();
@@ -186,6 +216,207 @@ function padHub(pad, btn) {
     padMsg(pad, { t: 'resumeGame', gameId: ent.g.id });
   }
   render();
+}
+
+// ---------------------------------------------------------- settings screen
+// The TV's own settings, driven entirely by a d-pad. Requests go out from the
+// kiosk over loopback, which the server trusts without a code — standing in
+// front of the television is the credential (see server/settings.js).
+//
+// Views: menu -> wifi (network list) -> pass (on-screen keyboard), plus
+// display. `cfg.busy` blocks input while a request is in flight.
+const cfg = {
+  view: 'menu', idx: 0, info: null, nets: null,
+  busy: '', note: '', osk: null, target: null, loading: false,
+};
+
+const chooseModes = () => ['party', 'retro', 'settings'];
+
+function openSettings() {
+  Object.assign(cfg, { view: 'menu', idx: 0, nets: null, note: '', osk: null, target: null });
+  loadSettings();
+}
+
+async function loadSettings() {
+  cfg.loading = true;
+  try { cfg.info = await S.state(); }
+  catch (e) { cfg.note = e.message; }
+  cfg.loading = false;
+  render();
+}
+
+// Rows of the top-level menu, built fresh each render so they reflect state.
+function settingsMenu() {
+  const n = cfg.info?.network;
+  const d = cfg.info?.display;
+  const rows = [
+    { label: `📶 Wi-Fi — ${n?.ssid || 'not connected'}`, go: 'wifi' },
+    { label: `🖥️ Display — ${d?.mode === 'native' ? 'native' : '1080p'}`, go: 'display' },
+  ];
+  if (d?.pending) rows.push({ label: '↻ Restart to apply the display change', act: 'reboot' });
+  rows.push({ label: '← Back', act: 'back' });
+  return rows;
+}
+
+function displayRows() {
+  const mode = cfg.info?.display?.mode || '1080p';
+  return [
+    { label: `${mode === '1080p' ? '◉' : '○'} 1080p — recommended on a Pi 4`, act: 'mode', v: '1080p' },
+    { label: `${mode === 'native' ? '◉' : '○'} Native — whatever the TV asks for`, act: 'mode', v: 'native' },
+    { label: '← Back', act: 'back' },
+  ];
+}
+
+function wifiRows() {
+  if (cfg.nets === null) return [{ label: cfg.busy ? 'Scanning…' : '🔍 Scan for networks', act: 'scan' }, { label: '← Back', act: 'back' }];
+  const rows = cfg.nets.map(x => ({
+    label: `${S.bars(x.signal)}  ${x.ssid}${x.current ? '  · connected' : ''}${x.secured ? '  🔒' : ''}`,
+    act: 'join', net: x,
+  }));
+  rows.push({ label: '🔍 Scan again', act: 'scan' });
+  rows.push({ label: '← Back', act: 'back' });
+  return rows;
+}
+
+function settingsRows() {
+  if (cfg.view === 'wifi') return wifiRows();
+  if (cfg.view === 'display') return displayRows();
+  return settingsMenu();
+}
+
+async function settingsDo(fn, okMsg) {
+  cfg.busy = '1';
+  cfg.note = '';
+  render();
+  try {
+    await fn();
+    if (okMsg) cfg.note = okMsg;
+  } catch (e) {
+    cfg.note = e.message;
+    sfx.nope();
+  }
+  cfg.busy = '';
+  render();
+}
+
+function padSettings(btn) {
+  // The keyboard owns every button while it's up.
+  if (cfg.view === 'pass') {
+    const r = oskNav(cfg.osk, btn);
+    if (r === 'cancel') { cfg.view = 'wifi'; cfg.osk = null; sfx.back(); }
+    else if (r === 'submit') {
+      const net = cfg.target;
+      const pass = cfg.osk.text;
+      cfg.view = 'wifi'; cfg.osk = null;
+      sfx.select();
+      joinNetwork(net, pass);
+    } else sfx.blip();
+    render();
+    return;
+  }
+  if (cfg.busy) return;
+
+  const rows = settingsRows();
+  if (btn === 'up') { cfg.idx = (cfg.idx + rows.length - 1) % rows.length; sfx.blip(); }
+  if (btn === 'down') { cfg.idx = (cfg.idx + 1) % rows.length; sfx.blip(); }
+  if (btn === 'b') {
+    sfx.back();
+    if (cfg.view === 'menu') { tvMode = null; chooseIdx = 2; }
+    else { cfg.view = 'menu'; cfg.idx = 0; cfg.note = ''; }
+    render();
+    return;
+  }
+  if (btn === 'a' || btn === 'start') {
+    const row = rows[Math.min(cfg.idx, rows.length - 1)];
+    if (!row) return;
+    sfx.select();
+    if (row.go) { cfg.view = row.go; cfg.idx = 0; cfg.note = ''; if (row.go === 'wifi' && !cfg.nets) scanNetworks(); }
+    else if (row.act === 'back') {
+      if (cfg.view === 'menu') { tvMode = null; chooseIdx = 2; }
+      else { cfg.view = 'menu'; cfg.idx = 0; }
+    } else if (row.act === 'scan') scanNetworks();
+    else if (row.act === 'join') startJoin(row.net);
+    else if (row.act === 'mode') {
+      settingsDo(async () => {
+        const r = await S.setDisplay(row.v);
+        await loadSettings();
+        cfg.note = r.reboot ? 'Saved — restart the station to apply.' : 'Display updated.';
+      });
+      return;
+    } else if (row.act === 'reboot') {
+      settingsDo(() => S.reboot(), 'Restarting…');
+      return;
+    }
+  }
+  render();
+}
+
+function scanNetworks() {
+  settingsDo(async () => {
+    const r = await S.scan();
+    cfg.nets = (r.networks || []).sort((a, b) => b.signal - a.signal);
+    cfg.idx = 0;
+  });
+}
+
+function startJoin(net) {
+  if (net.current) { cfg.note = `Already on ${net.ssid}.`; render(); return; }
+  cfg.target = net;
+  if (!net.secured) { joinNetwork(net, ''); return; }
+  cfg.osk = newOsk('');
+  cfg.view = 'pass';
+  render();
+}
+
+function joinNetwork(net, password) {
+  settingsDo(async () => {
+    // Switching drops every phone and changes the address guests need, so the
+    // screen has to announce the new one — it's the only thing still visible.
+    await S.connect(net.ssid, password);
+    cfg.nets = null;
+    await loadSettings();
+    cfg.view = 'menu';
+    cfg.idx = 0;
+    const ip = cfg.info?.network?.ips?.[0] || cfg.info?.ips?.[0];
+    cfg.note = `Joined ${net.ssid}. Phones now join at ${ip || 'the address above'}.`;
+  });
+}
+
+function settingsScreen() {
+  disposeScene();
+  if (cfg.view === 'pass') {
+    return h('div', { class: 'tv-stage' },
+      h('div', { class: 'tv-top' }, h('div', { class: 'tv-title' }, '🔑 ', cfg.target?.ssid || 'Wi-Fi'), urlBox()),
+      h('div', { class: 'tv-main' }, oskEl(cfg.osk, { title: `Password for ${cfg.target?.ssid || ''}`, masked: false })),
+    );
+  }
+  const rows = settingsRows();
+  const idx = Math.min(cfg.idx, rows.length - 1);
+  const title = cfg.view === 'wifi' ? '📶 Wi-Fi' : cfg.view === 'display' ? '🖥️ Display' : '⚙️ Settings';
+  const unsupported = cfg.info && !cfg.info.supported;
+  return h('div', { class: 'tv-stage' },
+    h('div', { class: 'tv-top' }, h('div', { class: 'tv-title' }, title), urlBox()),
+    h('div', { class: 'hub-fill' },
+      h('div', { class: 'hub-center', style: 'max-width:900px;width:100%' },
+        cfg.loading && !cfg.info
+          ? h('div', { class: 'dim center', style: 'font-size:22px' }, 'Loading…')
+          : unsupported
+            ? h('div', { class: 'banner center', style: 'font-size:20px' },
+              cfg.info.isPi
+                ? '⚠️ The system helper isn’t installed — re-run the Party Station setup script.'
+                : 'ℹ️ Wi-Fi and display settings only work on the Raspberry Pi that runs the station.')
+            : h('div', { class: 'set-list' }, rows.map((r, i) =>
+              h('div', { class: 'set-row' + (i === idx ? ' focus' : '') }, r.label))),
+        cfg.busy ? h('div', { class: 'dim center', style: 'margin-top:16px;font-size:20px' }, 'Working…') : null,
+        cfg.note ? h('div', { class: 'banner center', style: 'margin-top:16px;font-size:19px' }, cfg.note) : null,
+        cfg.view === 'display'
+          ? h('p', { class: 'dim center', style: 'margin-top:14px;font-size:17px;max-width:760px' },
+            'A Pi 4 can’t drive a 4K desktop: at 2160p the menus crawl and emulator '
+            + 'sound breaks up, because the emulator clocks its audio off a video '
+            + 'signal that can’t hold 60fps. Capping the output fixes both.')
+          : null)),
+    hintBar([['🎮 ▲▼', 'move'], ['🎮 A', 'select'], ['🎮 B', 'back'], ['📱', `phones: http://${joinHost()}/settings`]]),
+  );
 }
 
 function padLobby(pad, btn, info) {
@@ -324,8 +555,26 @@ function refreshMenus() {
 
 // ------------------------------------------------------------------ views
 
+// The kiosk loads http://localhost/tv, so the browser's own URL is useless to
+// a guest holding a phone — it literally says "localhost". The server knows
+// the real answer and ships it in the sync payload (server/hostinfo.js);
+// prefer a raw IP, which resolves everywhere, over the .local name.
+// A smart TV browsing to the station over the network is already on a real
+// address, so leave that case alone.
+function joinHost() {
+  const own = location.hostname.toLowerCase();
+  const isLoopback = own === 'localhost' || own === '::1' || own.startsWith('127.');
+  if (!isLoopback) return location.host;
+  const n = sync?.net;
+  return n?.ips?.[0] || n?.host || location.host;
+}
+
 function urlBox() {
-  return h('div', { class: 'tv-url' }, 'Phones join at ', h('b', {}, location.host));
+  const n = sync?.net;
+  const alt = n?.host && n.host !== joinHost() ? n.host : null;
+  return h('div', { class: 'tv-url' },
+    'Phones join at ', h('b', {}, joinHost()),
+    alt ? h('span', { class: 'dim', style: 'font-size:.8em;margin-left:8px' }, `or ${alt}`) : null);
 }
 
 function wordmark(size = 40) {
@@ -390,6 +639,12 @@ const GAME_ICONS = {
       '<g><ellipse cx="0" cy="0" rx="9.5" ry="6" fill="#4da3ff"/>'
       + '<path d="M7 0 L14 -6 L14 6 Z" fill="#4da3ff"/>'
       + '<circle cx="-4.5" cy="-1.5" r="1.4" fill="#10121f"/></g>')),
+  // A payoff pile with a wild King on top — the two things the game is about.
+  spite: s => svgIcon(s, 68, 58,
+    cardSvg({ x: 26, y: 30, rot: -9, back: true })
+    + cardSvg({ x: 44, y: 27, rot: 8, rank: 'K', suit: 'spade' }).replace(SUIT_PATHS.spade,
+      '<path d="M0 -11 L4 -3 L11 -6 L8 4 L-8 4 L-11 -6 L-4 -3 Z" fill="#b98bff"/>'
+      + '<rect x="-8" y="5.5" width="16" height="3.5" rx="1" fill="#b98bff"/>')),
 };
 
 function gameIcon(g, size) {
@@ -447,6 +702,7 @@ function disposeScene() {
 function hubScreen() {
   disposeScene();
   if (tvMode === null) return chooseScreen();
+  if (tvMode === 'settings') return settingsScreen();
   if (tvMode === 'retro') return retroHubScreen();
   const list = hubList();
   return h('div', { class: 'tv-stage' },
@@ -468,7 +724,7 @@ function hubScreen() {
       sync.players.length
         ? sync.players.map(p => h('div', { class: 'chip' }, h('span', { class: 'dot' }, p.name[0]?.toUpperCase()), p.name))
         : h('span', { class: 'dim', style: 'font-size:18px' }, 'No players yet — join from a phone or press a button on a paired controller.')),
-    hintBar([['🎮 A', 'open game'], ['🎮 X', 'resume save'], ['🎮 B', 'retro ⇄ party'], ['📱', `phones: http://${location.host}`]]),
+    hintBar([['🎮 A', 'open game'], ['🎮 X', 'resume save'], ['🎮 B', 'retro ⇄ party'], ['📱', `phones: http://${joinHost()}`]]),
   );
 }
 
@@ -479,7 +735,12 @@ function chooseScreen() {
     { icon: () => h('span', { style: 'font-size:76px;line-height:1.2' }, '🃏'), name: 'Party Games', sub: 'Card games — phones and controllers', cls: 'cat-cards', mode: 'party' },
     {
       icon: () => arcadeIcon(76), name: 'Retro Games', cls: 'cat-arcade', mode: 'retro',
-      sub: sync.emu?.available ? `${emuGames} classics on the emulator` : `Add ROMs at http://${location.host}/roms`,
+      sub: sync.emu?.available ? `${emuGames} classics on the emulator` : `Add ROMs at http://${joinHost()}/roms`,
+    },
+    {
+      icon: () => h('span', { style: 'font-size:76px;line-height:1.2' }, '⚙️'),
+      name: 'Settings', cls: 'cat-board', mode: 'settings',
+      sub: 'Wi-Fi and display',
     },
   ];
   return h('div', { class: 'tv-stage' },
@@ -490,13 +751,13 @@ function chooseScreen() {
         h('div', { class: 'row', style: 'gap:26px;justify-content:center' },
           tiles.map((t2, i) => h('div', {
             class: `game-tile ${t2.cls}` + (chooseIdx === i ? ' tv-focus' : ''),
-            style: 'width:360px;min-height:250px;align-items:center;justify-content:center;text-align:center;gap:12px',
-            onclick: () => { tvMode = t2.mode; hubCursor = 0; render(); },
+            style: 'width:320px;min-height:250px;align-items:center;justify-content:center;text-align:center;gap:12px',
+            onclick: () => { tvMode = t2.mode; hubCursor = 0; if (t2.mode === 'settings') openSettings(); render(); },
           },
             t2.icon(),
             h('div', { class: 'g-name', style: 'font-size:27px' }, t2.name),
             h('div', { class: 'g-sub', style: 'font-size:14px' }, t2.sub)))))),
-    hintBar([['🎮 ◀▶', 'choose'], ['🎮 A', 'select'], ['📱', `phones: http://${location.host}`]]),
+    hintBar([['🎮 ◀▶', 'choose'], ['🎮 A', 'select'], ['📱', `phones: http://${joinHost()}`]]),
   );
 }
 
@@ -540,10 +801,10 @@ function retroHubScreen() {
           arcadeIcon(110),
           h('div', { class: 'tv-big', style: 'font-size:40px' }, 'No retro games yet'),
           h('p', { class: 'dim', style: 'font-size:22px;margin-top:12px' },
-            `Add ROMs of games you own at http://${location.host}/roms`),
+            `Add ROMs of games you own at http://${joinHost()}/roms`),
           h('p', { class: 'dim', style: 'font-size:18px' },
             `or scp them into ~/RetroPie/roms/incoming — they sort themselves.`))),
-    hintBar([['🎮 A', 'play'], ['🎮 B', 'back'], ['📱', `phones: http://${location.host}`]]),
+    hintBar([['🎮 A', 'play'], ['🎮 B', 'back'], ['📱', `phones: http://${joinHost()}`]]),
   );
 }
 
@@ -719,6 +980,21 @@ function soundTransitions() {
   }
 }
 
+// A phone asked to change the network; the code exists only here, on screen.
+// Drawn over whatever else is showing so it works mid-game too.
+function pinOverlay() {
+  const p = sync.settingsPin;
+  if (!p) return null;
+  return h('div', { class: 'pin-overlay' },
+    h('div', { class: 'pin-card' },
+      h('div', { class: 'eyebrow', style: 'font-size:19px' }, 'Settings unlock code'),
+      h('div', { class: 'code' }, p.code),
+      h('p', { class: 'dim', style: 'font-size:20px;margin-top:14px' },
+        'Type this on the phone that asked to change Wi-Fi or the display.'),
+      h('p', { class: 'dim', style: 'font-size:16px;margin-top:6px' },
+        'It disappears in a minute and a half.')));
+}
+
 function render() {
   if (!sync) return;
   soundTransitions();
@@ -726,14 +1002,15 @@ function render() {
   // A session started from a phone answers the landing prompt implicitly.
   if (tvMode === null && sync.phase !== 'hub') tvMode = 'party';
   if (sync.phase === 'game') refreshMenus(); else menus.clear();
+  const pin = pinOverlay();
   switch (sync.phase) {
     case 'hub':
-      mount(root, hubScreen());
+      mount(root, hubScreen(), pin);
       // Shelves can overflow the screen — keep the pad cursor's tile visible.
       requestAnimationFrame(() => root.querySelector('.tv-focus')?.scrollIntoView({ block: 'nearest' }));
       break;
-    case 'lobby': mount(root, lobbyScreen()); break;
-    case 'game': mount(root, gameScreen()); break;
-    case 'gameover': mount(root, gameoverScreen()); break;
+    case 'lobby': mount(root, lobbyScreen(), pin); break;
+    case 'game': mount(root, gameScreen(), pin); break;
+    case 'gameover': mount(root, gameoverScreen(), pin); break;
   }
 }

@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#171a2b">
+  <title>Party Station — Settings</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚙️</text></svg>">
+  <link rel="stylesheet" href="/css/style.css">
+  <style>
+    .wifi-row {
+      display: flex; align-items: center; gap: 10px; padding: 11px 12px;
+      background: var(--raised); border-radius: 12px; font-size: 15px;
+      width: 100%; border: 0; color: inherit; text-align: left; font: inherit;
+      cursor: pointer;
+    }
+    .wifi-row:disabled { cursor: default; }
+    .wifi-row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .wifi-row .sig { font-family: ui-monospace, monospace; letter-spacing: 1px; color: var(--chalk-dim); }
+    .wifi-row.on { outline: 2px solid var(--marquee); }
+    .wifi-row .tag { font-size: 12px; color: var(--chalk-dim); }
+    .pinbox {
+      font-size: 34px; letter-spacing: 14px; text-align: center;
+      font-variant-numeric: tabular-nums; padding: 12px;
+    }
+    .modes { display: grid; gap: 8px; }
+    .mode {
+      display: flex; gap: 10px; align-items: flex-start; padding: 12px;
+      background: var(--raised); border-radius: 12px; border: 2px solid transparent;
+      width: 100%; color: inherit; text-align: left; font: inherit; cursor: pointer;
+    }
+    .mode.on { border-color: var(--marquee); }
+    .mode .tick { font-size: 18px; width: 22px; flex: none; }
+    .mode .sub { font-size: 13px; color: var(--chalk-dim); margin-top: 2px; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module">
+    import { h, mount, toast, sheet } from '/js/ui.js';
+    import * as S from '/js/settings-core.js';
+
+    const root = document.getElementById('app');
+    let info = null;        // GET /api/settings
+    let nets = null;        // networks from the last scan, or null if not scanned
+    let scanning = false;
+    let busy = '';          // ssid currently being joined
+    let locked = false;     // server asked for the TV code
+    let pinSent = false;    // a code is on the TV right now
+
+    async function refresh() {
+      try { info = await S.state(); } catch (e) { toast(e.message, true); }
+      render();
+    }
+
+    async function guard(fn) {
+      try {
+        await fn();
+        locked = false;
+      } catch (e) {
+        if (e.needPin) { locked = true; pinSent = false; }
+        else toast(e.message, true);
+      }
+      render();
+    }
+
+    // ------------------------------------------------------------- unlocking
+
+    function unlockScreen() {
+      const input = h('input', {
+        class: 'field pinbox', type: 'text', inputmode: 'numeric',
+        maxlength: 4, placeholder: '••••', autocomplete: 'one-time-code',
+      });
+      const submit = async () => {
+        const pin = input.value.trim();
+        if (pin.length !== 4) { toast('That code is four digits.', true); return; }
+        try {
+          await S.unlock(pin);
+          locked = false; pinSent = false;
+          toast('Unlocked');
+          await refresh();
+        } catch (e) { toast(e.message, true); input.value = ''; input.focus(); }
+      };
+      input.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
+      return h('div', { class: 'stack' },
+        h('div', { class: 'banner' },
+          '🔒 Changing the network or the display needs the code shown on the TV. ',
+          'That way only someone who can see the screen can re-point the station.'),
+        pinSent
+          ? h('div', { class: 'stack' },
+            h('p', { class: 'dim', style: 'font-size:14px' },
+              'Look at the TV — a four-digit code is on screen for 90 seconds.'),
+            input,
+            h('button', { class: 'tok primary big', onclick: submit }, 'Unlock'))
+          : h('button', {
+            class: 'tok primary big',
+            onclick: async () => {
+              try {
+                await S.requestPin();
+                pinSent = true;
+                render();
+                toast('Code is on the TV');
+              } catch (e) { toast(e.message, true); }
+            },
+          }, '📺 Show me the code'),
+        h('p', { class: 'dim', style: 'font-size:12px' },
+          'No TV connected? The code is also written to the server log ',
+          h('b', {}, '(journalctl -u party-station)'), '.'),
+      );
+    }
+
+    // ------------------------------------------------------------------ wifi
+
+    function joinSheet(net) {
+      if (!net.secured) return void guard(() => join(net.ssid, ''));
+      const input = h('input', {
+        class: 'field', type: 'password', placeholder: 'Wi-Fi password',
+        autocomplete: 'current-password', autocapitalize: 'none', spellcheck: 'false',
+      });
+      const show = h('input', { type: 'checkbox' });
+      show.addEventListener('change', () => { input.type = show.checked ? 'text' : 'password'; });
+      const s = sheet(`Join ${net.ssid}`,
+        h('div', { class: 'stack' },
+          input,
+          h('label', { class: 'row', style: 'gap:8px;font-size:14px;align-items:center' },
+            show, 'Show password'),
+          h('p', { class: 'dim', style: 'font-size:13px' },
+            'The station will drop off this network while it switches, so this page ',
+            'will stop responding for a moment. If the password is wrong it comes ',
+            'straight back to ', h('b', {}, info?.network?.ssid || 'the current network'), '.'),
+          h('div', { class: 'row' },
+            h('button', { class: 'tok ghost grow', onclick: () => s.remove() }, 'Cancel'),
+            h('button', {
+              class: 'tok primary grow',
+              onclick: () => { s.remove(); guard(() => join(net.ssid, input.value)); },
+            }, 'Join'))));
+      setTimeout(() => input.focus(), 50);
+    }
+
+    async function join(ssid, password) {
+      busy = ssid;
+      render();
+      try {
+        const r = await S.connect(ssid, password);
+        toast(`Joined ${ssid}`);
+        nets = null;
+        await refresh();
+        // The address almost certainly changed — send people to the new one.
+        if (r.ips?.length) {
+          sheet('📶 Now on ' + ssid,
+            h('div', { class: 'stack' },
+              h('p', { class: 'dim' }, 'Reconnect your phone to the same Wi-Fi, then open:'),
+              ...r.ips.map(ip => h('div', { class: 'banner center' }, h('b', {}, ip))),
+              info?.host && h('p', { class: 'dim', style: 'font-size:13px' },
+                'or ', h('b', {}, info.host), ' if your phone supports it.')));
+        }
+      } finally {
+        busy = '';
+      }
+    }
+
+    function wifiSection() {
+      const cur = info?.network;
+      const kids = [h('div', { class: 'eyebrow' }, 'Wi-Fi')];
+      if (cur?.err) {
+        kids.push(h('div', { class: 'banner' }, `⚠️ ${cur.err}`));
+        return kids;
+      }
+      kids.push(h('div', { class: 'banner' },
+        cur?.ssid
+          ? h('div', {},
+            h('div', {}, '📶 On ', h('b', {}, cur.ssid),
+              cur.signal != null ? ` · ${S.signalWord(cur.signal)}` : ''),
+            h('div', { class: 'dim', style: 'font-size:13px;margin-top:4px' },
+              'Phones join at ', h('b', {}, (cur.ips || [])[0] || info?.host || '—')))
+          : h('div', {}, '⚠️ Not connected to any Wi-Fi')));
+
+      kids.push(h('button', {
+        class: 'tok' + (scanning ? '' : ' primary'),
+        disabled: scanning,
+        onclick: () => guard(async () => {
+          scanning = true; render();
+          try { nets = (await S.scan()).networks || []; }
+          finally { scanning = false; }
+          nets.sort((a, b) => b.signal - a.signal);
+        }),
+      }, scanning ? 'Scanning…' : '🔍 Scan for networks'));
+
+      if (nets) {
+        if (!nets.length) kids.push(h('p', { class: 'dim center' }, 'No networks found.'));
+        for (const n of nets) {
+          const saved = (cur?.saved || []).includes(n.ssid);
+          kids.push(h('button', {
+            class: 'wifi-row' + (n.current ? ' on' : ''),
+            disabled: !!busy,
+            onclick: () => { if (!n.current) joinSheet(n); },
+          },
+            h('span', { class: 'sig' }, S.bars(n.signal)),
+            h('span', { class: 'name' }, n.ssid),
+            busy === n.ssid ? h('span', { class: 'tag' }, 'joining…')
+              : n.current ? h('span', { class: 'tag' }, 'connected')
+                : saved ? h('span', { class: 'tag' }, 'saved') : null,
+            h('span', { class: 'tag' }, n.secured ? '🔒' : '🔓')));
+        }
+      }
+
+      const forgettable = (cur?.saved || []).filter(s => s !== cur?.ssid);
+      if (forgettable.length) {
+        kids.push(h('div', { class: 'eyebrow', style: 'margin-top:8px' }, 'Saved networks'));
+        for (const ssid of forgettable) {
+          kids.push(h('div', { class: 'wifi-row' },
+            h('span', { class: 'name' }, ssid),
+            h('button', {
+              class: 'tok small danger',
+              onclick: () => guard(async () => {
+                await S.forget(ssid);
+                toast(`Forgot ${ssid}`);
+                await refresh();
+              }),
+            }, 'Forget')));
+        }
+      }
+      return kids;
+    }
+
+    // --------------------------------------------------------------- display
+
+    function displaySection() {
+      const d = info?.display;
+      const kids = [h('div', { class: 'eyebrow' }, 'Display')];
+      if (d?.err) { kids.push(h('div', { class: 'banner' }, `⚠️ ${d.err}`)); return kids; }
+      const mode = d?.mode || '1080p';
+      const opt = (v, title, sub) => h('button', {
+        class: 'mode' + (mode === v ? ' on' : ''),
+        onclick: () => guard(async () => {
+          if (mode === v) return;
+          const r = await S.setDisplay(v);
+          await refresh();
+          toast(r.reboot ? 'Saved — restart to apply' : 'Display updated');
+        }),
+      },
+        h('span', { class: 'tick' }, mode === v ? '◉' : '○'),
+        h('span', {}, h('div', {}, title), h('div', { class: 'sub' }, sub)));
+
+      kids.push(h('div', { class: 'modes' },
+        opt('1080p', '1080p', 'Caps HDMI output at 1920×1080. A Pi 4 can’t drive a 4K desktop — at 2160p the menus crawl and emulator sound breaks up.'),
+        opt('native', 'Native', 'Use whatever the TV prefers. Fine on a 1080p set; expect lag and audio trouble on a 4K one.')));
+
+      if (d?.pending) {
+        kids.push(h('div', { class: 'banner hot' },
+          h('div', {}, '↻ The screen is still at ' + (d.live || 'its old mode') + ' — restart to apply.'),
+          h('button', {
+            class: 'tok small', style: 'margin-top:8px',
+            onclick: () => guard(async () => { await S.reboot(); toast('Restarting…'); }),
+          }, 'Restart the station')));
+      } else if (d?.live) {
+        kids.push(h('p', { class: 'dim', style: 'font-size:13px' }, `Screen is running at ${d.live}.`));
+      }
+      return kids;
+    }
+
+    // ------------------------------------------------------------------ view
+
+    function render() {
+      if (!info) { mount(root, h('div', { class: 'screen' }, h('p', { class: 'dim center' }, 'Loading…'))); return; }
+      const body = [];
+      if (!info.supported) {
+        body.push(h('div', { class: 'banner' },
+          info.isPi
+            ? '⚠️ The system helper isn’t installed — re-run the Party Station setup script on the Pi.'
+            : 'ℹ️ Wi-Fi and display settings only work on the Raspberry Pi that runs the station.'));
+      } else if (locked) {
+        body.push(unlockScreen());
+      } else {
+        body.push(h('div', { class: 'stack' }, wifiSection()));
+        body.push(h('div', { class: 'divider' }));
+        body.push(h('div', { class: 'stack' }, displaySection()));
+      }
+
+      body.push(h('div', { class: 'divider' }));
+      body.push(h('div', { class: 'stack' },
+        h('div', { class: 'eyebrow' }, 'Where phones join'),
+        ...S.joinAddresses(info).map(a => h('div', { class: 'banner center' }, h('b', {}, a))),
+        h('p', { class: 'dim', style: 'font-size:13px' },
+          'Read one of these out to guests, or point them at the address on the TV.')));
+
+      mount(root, h('div', { class: 'screen', style: 'max-width:640px' },
+        h('div', { class: 'topbar' },
+          h('div', {},
+            h('div', { class: 'eyebrow' }, 'Party Station'),
+            h('h1', {}, 'Settings')),
+          h('a', { class: 'tok small', href: '/' }, '← Games')),
+        ...body));
+    }
+
+    refresh();
+
+    // A self-update restarts the server with new client code; reload so this
+    // page doesn't keep running the old one. Same poller as /roms.
+    let pageVersion = null;
+    setInterval(async () => {
+      try {
+        const s = await (await fetch('/api/status', { cache: 'no-store' })).json();
+        if (pageVersion === null) pageVersion = s.version;
+        else if (s.version !== pageVersion && !busy) location.reload();
+      } catch {}
+    }, 20000);
+  </script>
+</body>
+</html>

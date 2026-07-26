@@ -1,10 +1,28 @@
 // Card helpers. A card is a 2-char string: rank + suit, e.g. 'As', 'Td', '9c'.
+// Jokers are the odd one out: 'Xj', with a rank and suit that appear in
+// neither RANKS nor SUITS, so every helper below handles them explicitly.
 export const RANKS = '23456789TJQKA';
 export const SUITS = 'shdc';
+export const JOKER = 'Xj';
+
+export const isJoker = c => c === JOKER;
 
 export function freshDeck() {
   const d = [];
   for (const s of SUITS) for (const r of RANKS) d.push(r + s);
+  return shuffle(d);
+}
+
+// Several decks shuffled together, optionally with jokers — Spite & Malice
+// needs two to five of them depending on the table size. Note that this
+// yields DUPLICATE card strings, so anything downstream must identify cards
+// by position, never by value (no Set, no indexOf-as-identity).
+export function freshDecks(n, { jokers = 0 } = {}) {
+  const d = [];
+  for (let i = 0; i < n; i++) {
+    for (const s of SUITS) for (const r of RANKS) d.push(r + s);
+    for (let j = 0; j < jokers; j++) d.push(JOKER);
+  }
   return shuffle(d);
 }
 
@@ -18,11 +36,14 @@ export function shuffle(arr) {
 
 export const rank = c => c[0];
 export const suit = c => c[1];
-export const rv = c => RANKS.indexOf(c[0]) + 2; // 2..14
+export const rv = c => (isJoker(c) ? 0 : RANKS.indexOf(c[0]) + 2); // 2..14, joker 0
 
 export function sortHand(hand) {
   const so = { s: 0, h: 1, c: 2, d: 3 };
-  return hand.sort((a, b) => so[suit(a)] - so[suit(b)] || rv(a) - rv(b));
+  // Jokers have no suit, so they'd sort as NaN and scramble the hand — park
+  // them at the end instead.
+  const key = c => so[suit(c)] ?? 9;
+  return hand.sort((a, b) => key(a) - key(b) || rv(a) - rv(b));
 }
 
 export function removeCard(hand, c) {

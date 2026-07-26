@@ -5,9 +5,10 @@ import * as crazy8s from './games/cards/crazy8s.js';
 import * as holdem from './games/cards/holdem.js';
 import * as blackjack from './games/cards/blackjack.js';
 import * as gofish from './games/cards/gofish.js';
+import * as spite from './games/cards/spite.js';
 
 export const MODULES = [
-  hearts, crazy8s, holdem, blackjack, gofish,
+  hearts, crazy8s, holdem, blackjack, gofish, spite,
 ];
 
 const map = new Map(MODULES.map(m => [m.meta.id, m]));

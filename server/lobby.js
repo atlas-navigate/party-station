@@ -11,6 +11,8 @@ import { byId, catalog } from './registry.js';
 import * as saves from './saves.js';
 import * as updater from './updater.js';
 import * as emulator from './emulator.js';
+import * as hostinfo from './hostinfo.js';
+import { pinForTv } from './settings.js';
 import { botName } from './bots.js';
 
 const players = new Map();   // pid -> {id, name, token, ws, connected}
@@ -60,6 +62,12 @@ function sharedState() {
     updateError: updater.status.error,
     emu: emulator.summary(),
     emulator: emulator.publicState(),
+    // The address guests should actually type. The TV can't work this out for
+    // itself — the kiosk's own URL is http://localhost/tv.
+    net: hostinfo.addresses(),
+    // Set while someone on a phone is waiting to be let into settings; the TV
+    // is the only place this code is ever shown.
+    settingsPin: pinForTv(),
   };
 }
 

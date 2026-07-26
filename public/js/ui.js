@@ -42,6 +42,19 @@ export function cardEl(card, opts = {}) {
   if (card === 'back' || !card) {
     return h('div', { class: `pcard back ${opts.size || ''}` });
   }
+  // Jokers ('Xj') have no rank or suit. Drawn with a star rather than the 🃏
+  // emoji on purpose: the Playing Cards unicode block renders as empty boxes
+  // in the Pi kiosk's Chromium.
+  if (card === 'Xj') {
+    return h(opts.button === false ? 'div' : 'button', {
+      class: `pcard joker ${opts.size || ''} ${opts.sel ? 'sel' : ''} ${opts.dis ? 'dis' : ''}`,
+      onclick: opts.onclick,
+      'aria-label': 'Joker (wild)',
+    },
+      h('span', { class: 'r' }, 'JKR'),
+      h('span', { class: 's' }, '★'),
+    );
+  }
   const r = card[0], s = card[1];
   const red = s === 'h' || s === 'd';
   return h(opts.button === false ? 'div' : 'button', {
@@ -54,7 +67,14 @@ export function cardEl(card, opts = {}) {
   );
 }
 
-export function handStrip(cards, { legal = null, selected = [], onTap, size = '' } = {}) {
+// `legal`/`selected` match by card VALUE, which is ambiguous once a game
+// deals multiple decks — two identical aces would highlight together. Games
+// that do (Spite & Malice) pass `legalIdx`/`selIdx` instead, which are lists
+// of positions in `cards` and take precedence. onTap receives (card, index)
+// either way; older callers just ignore the second argument.
+export function handStrip(cards, {
+  legal = null, selected = [], legalIdx = null, selIdx = null, onTap, size = '',
+} = {}) {
   // Split the hand into near-equal rows sized to the phone width, then fan
   // each row like really held cards: every card tilts away from the row's
   // middle (--rot) and the edges droop slightly (--lift, along the card's
@@ -69,16 +89,17 @@ export function handStrip(cards, { legal = null, selected = [], onTap, size = ''
   const nRows = Math.max(1, Math.ceil(cards.length / cap));
   const per = Math.ceil(cards.length / nRows);
   const rows = [];
-  for (let i = 0; i < cards.length; i += per) rows.push(cards.slice(i, i + per));
-  return h('div', { class: 'hand', style: `--cw:${cw}px` }, rows.map(row => {
+  for (let i = 0; i < cards.length; i += per) rows.push({ base: i, cards: cards.slice(i, i + per) });
+  return h('div', { class: 'hand', style: `--cw:${cw}px` }, rows.map(({ base, cards: row }) => {
     const mid = (row.length - 1) / 2;
     const tilt = Math.min(4, 26 / Math.max(row.length, 1));
     return h('div', { class: 'hand-row' }, row.map((c, i) => {
+      const at = base + i; // position in the whole hand, not just this row
       const el = cardEl(c, {
         size,
-        sel: selected.includes(c),
-        dis: legal && !legal.includes(c),
-        onclick: onTap ? () => onTap(c) : undefined,
+        sel: selIdx ? selIdx.includes(at) : selected.includes(c),
+        dis: legalIdx ? !legalIdx.includes(at) : (legal && !legal.includes(c)),
+        onclick: onTap ? () => onTap(c, at) : undefined,
       });
       el.style.setProperty('--rot', ((i - mid) * tilt).toFixed(2) + 'deg');
       el.style.setProperty('--lift', (Math.abs(i - mid) ** 2 * 1.6).toFixed(1) + 'px');
@@ -161,6 +182,65 @@ export function chipEl(seat, opts = {}) {
     h('span', { class: 'chip-txt' },
       h('span', {}, seat.name),
       extra ? h('span', { class: 'chip-sub' }, extra) : null),
+  );
+}
+
+// -------------------------------------------------------- on-screen keyboard
+// The TV has no keyboard, but joining a Wi-Fi network needs a passphrase
+// typed. This is a d-pad-driven character grid: a plain state object plus a
+// render and a nav function, because the console shell rebuilds its whole DOM
+// on every sync and can't hold on to widget instances.
+//
+// State: { text, r, c, shift } — make one with newOsk().
+const OSK_ROWS = [
+  '1234567890',
+  'qwertyuiop',
+  'asdfghjkl',
+  'zxcvbnm',
+  '-_.@#$%&*!?',
+  '+=/:,;()[]{}',
+];
+
+export function newOsk(text = '') { return { text, r: 1, c: 0, shift: false }; }
+
+function oskRow(st, r) {
+  const row = OSK_ROWS[r] || '';
+  return st.shift ? row.toUpperCase() : row;
+}
+
+// Returns 'submit' | 'cancel' | null. Mutates st in place.
+export function oskNav(st, btn) {
+  const rows = OSK_ROWS.length;
+  if (btn === 'up') { st.r = (st.r + rows - 1) % rows; }
+  else if (btn === 'down') { st.r = (st.r + 1) % rows; }
+  else if (btn === 'left') { st.c = (st.c + oskRow(st, st.r).length - 1) % oskRow(st, st.r).length; }
+  else if (btn === 'right') { st.c = (st.c + 1) % oskRow(st, st.r).length; }
+  else if (btn === 'a') { st.text += oskRow(st, st.r)[st.c] || ''; }
+  else if (btn === 'x') { st.text = st.text.slice(0, -1); }
+  else if (btn === 'y') { st.shift = !st.shift; }
+  else if (btn === 'lb') { st.text += ' '; }
+  else if (btn === 'start') return 'submit';
+  else if (btn === 'b') return 'cancel';
+  // A shorter row under the cursor must not strand the column past its end.
+  st.c = Math.min(st.c, Math.max(0, oskRow(st, st.r).length - 1));
+  return null;
+}
+
+export function oskEl(st, { title, masked = false } = {}) {
+  const shown = masked ? '•'.repeat(st.text.length) : st.text;
+  return h('div', { class: 'osk' },
+    title ? h('div', { class: 'osk-title' }, title) : null,
+    h('div', { class: 'osk-field' }, shown || h('span', { class: 'dim' }, 'type with the d-pad…')),
+    h('div', { class: 'osk-grid' }, OSK_ROWS.map((_, r) =>
+      h('div', { class: 'osk-row' }, [...oskRow(st, r)].map((ch, c) =>
+        h('span', { class: 'osk-key' + (r === st.r && c === st.c ? ' focus' : '') }, ch))))),
+    h('div', { class: 'osk-hints' },
+      h('span', {}, '🎮 A type'),
+      h('span', {}, 'X delete'),
+      h('span', {}, 'Y ' + (st.shift ? 'ABC→abc' : 'abc→ABC')),
+      h('span', {}, 'LB space'),
+      h('span', {}, 'Start done'),
+      h('span', {}, 'B cancel')),
   );
 }
 

@@ -1,8 +1,12 @@
 // Bluetooth/USB controller support via the browser Gamepad API.
 // Pads pair with the Pi (bluetoothctl or the desktop UI); Chromium exposes
-// them here. Standard mapping: A=0 B=1 X=2 Y=3 Start=9, dpad=12-15, with the
-// left stick doubling as a dpad.
-const BTN_MAP = { 0: 'a', 1: 'b', 2: 'x', 3: 'y', 9: 'start', 12: 'up', 13: 'down', 14: 'left', 15: 'right' };
+// them here. Standard mapping: A=0 B=1 X=2 Y=3 LB=4 RB=5 Start=9, dpad=12-15,
+// with the left stick doubling as a dpad. Screens that don't use a given
+// button simply ignore it, so naming more of them here costs nothing.
+const BTN_MAP = {
+  0: 'a', 1: 'b', 2: 'x', 3: 'y', 4: 'lb', 5: 'rb', 9: 'start',
+  12: 'up', 13: 'down', 14: 'left', 15: 'right',
+};
 const REPEAT_DELAY = 380, REPEAT_RATE = 140;
 
 export function createPads({ onPress, onConnect, onDisconnect }) {

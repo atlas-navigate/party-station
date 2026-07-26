@@ -13,6 +13,9 @@ import { getArt } from './art.js';
 import { defaultAudioToHdmi } from './audio.js';
 import * as emulator from './emulator.js';
 import { romsRouter, startIncomingSorter } from './roms.js';
+import { settingsRouter } from './settings.js';
+import * as hostinfo from './hostinfo.js';
+import * as sysctl from './sysctl.js';
 import * as updater from './updater.js';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -22,6 +25,7 @@ const app = express();
 app.use(express.static(path.join(ROOT, 'public')));
 app.get('/tv', (_req, res) => res.sendFile(path.join(ROOT, 'public', 'tv.html')));
 app.get('/roms', (_req, res) => res.sendFile(path.join(ROOT, 'public', 'roms.html')));
+app.get('/settings', (_req, res) => res.sendFile(path.join(ROOT, 'public', 'settings.html')));
 // Warm the box-art cache while there's likely internet (at boot and the
 // moment a ROM arrives) so covers are on disk before an offline party.
 // getArt dedupes and fails soft, so firing for the whole library is cheap.
@@ -34,6 +38,9 @@ function prefetchArt() {
 app.use('/api/roms', romsRouter({
   onChange: () => { emulator.scan(true); notifyClients(); prefetchArt(); },
 }));
+// Wi-Fi and display settings, reachable from the phone (/settings) and from
+// the TV's own on-screen menu. See server/settings.js for the access rules.
+app.use('/api/settings', settingsRouter({ onChange: () => notifyClients() }));
 // Box art for the retro hub: cached cover, or fetched on first browse
 // (see server/art.js). 404 = no cover known; the TV shows an icon instead.
 app.get('/api/art/:system/:file', async (req, res) => {
@@ -89,19 +96,19 @@ wss.on('connection', ws => {
 });
 
 server.listen(PORT, () => {
-  const nets = Object.values(os.networkInterfaces()).flat()
-    .filter(n => n && n.family === 'IPv4' && !n.internal).map(n => n.address);
-  // mDNS advertises the machine's real hostname — only the Pi is actually
-  // named "party-station". On a dev box, print the name that will resolve
-  // (scripts/dev-mdns.sh can alias party-station.local for testing).
-  const mdnsName = `${os.hostname().toLowerCase()}.local`;
+  // Same addresses the TV shows guests (see server/hostinfo.js) — on a dev
+  // box this prints the name that will actually resolve, since only the Pi is
+  // named "party-station" (scripts/dev-mdns.sh can alias it for testing).
+  const { host, ips } = hostinfo.addresses(true);
+  const port = PORT === 80 ? '' : ':' + PORT;
   console.log(`Party Station on port ${PORT}`);
-  console.log(`  Players: http://${mdnsName}${PORT === 80 ? '' : ':' + PORT}`);
-  for (const ip of nets) console.log(`  (or http://${ip}${PORT === 80 ? '' : ':' + PORT})`);
+  console.log(`  Players: http://${host}${port}`);
+  for (const ip of ips) console.log(`  (or http://${ip}${port})`);
   console.log(`  TV:      add /tv to either URL`);
 });
 
 updater.init({ isIdle, onStatusChange: notifyClients });
+sysctl.init(); // warm the display-mode cache before anyone launches a game
 startIncomingSorter({ onChange: () => { emulator.scan(true); notifyClients(); prefetchArt(); } });
 defaultAudioToHdmi();
 setTimeout(prefetchArt, 5000); // after boot, once the network is up

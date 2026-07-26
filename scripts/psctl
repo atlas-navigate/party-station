@@ -1,0 +1,415 @@
+#!/usr/bin/env bash
+# Party Station privileged helper.
+#
+# The game server runs as an unprivileged desktop user (see
+# systemd/party-station.service), but switching Wi-Fi and capping the display
+# mode both need root. Rather than hand the server broad privileges, it shells
+# out to this one script through a tightly scoped sudoers rule:
+#
+#   <run user> ALL=(root) NOPASSWD: /usr/local/sbin/party-station-ctl
+#
+# setup-pi.sh installs a COPY at /usr/local/sbin/party-station-ctl owned by
+# root — deliberately outside the repo, which the app user (and the
+# self-updater's `git reset --hard`) can rewrite at will. The sudoers rule must
+# never point back into /opt/party-station.
+#
+# Every subcommand prints a single JSON object on stdout and exits 0 on
+# success, or prints {"err": "..."} and exits non-zero. Nothing else goes to
+# stdout, so the caller can parse it directly (see server/sysctl.js).
+#
+# Subcommands:
+#   display-get                  current + configured video mode
+#   display-set 1080p|native     cap HDMI output (persistent, + live apply)
+#   net-status                   active SSID, signal, addresses, saved networks
+#   net-scan                     visible networks
+#   net-connect <ssid>           passphrase on STDIN; rolls back on failure
+#   net-forget <ssid>            delete saved profiles for an SSID
+#   reboot                       restart the box (display changes need one)
+set -uo pipefail
+
+umask 077
+
+CMDLINE=""
+for f in /boot/firmware/cmdline.txt /boot/cmdline.txt; do
+  [ -f "$f" ] && { CMDLINE="$f"; break; }
+done
+
+MODE_1080P="1920x1080@60"
+NM_DIR=/etc/NetworkManager/system-connections
+
+# ------------------------------------------------------------------ JSON out
+
+# Escape a bash string for use inside a JSON double-quoted value.
+jstr() {
+  printf '%s' "${1-}" \
+    | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/\t/\\t/g' \
+    | tr -d '\000-\010\013\014\016-\037'
+}
+
+die() { printf '{"err":"%s"}\n' "$(jstr "$1")"; exit 1; }
+
+# ------------------------------------------------------------------- display
+
+# The Pi 4 has two HDMI ports. Prefer whichever one has a TV on it; fall back
+# to the first port when nothing is plugged in (installing with the TV off is
+# normal, and the setting still has to be written).
+detect_output() {
+  local s name first=""
+  for s in /sys/class/drm/card*-HDMI-A-*/status; do
+    [ -f "$s" ] || continue
+    name="${s%/status}"; name="${name##*/}"; name="${name#card*-}"
+    if [ "$(cat "$s" 2>/dev/null)" = "connected" ]; then printf '%s' "$name"; return; fi
+    [ -z "$first" ] && first="$name"
+  done
+  printf '%s' "${first:-HDMI-A-1}"
+}
+
+# The live mode of a connected HDMI port, as WIDTHxHEIGHT, or "" if dark.
+live_mode() {
+  local m d
+  for d in /sys/class/drm/card*-HDMI-A-*; do
+    [ -f "$d/status" ] || continue
+    [ "$(cat "$d/status" 2>/dev/null)" = "connected" ] || continue
+    [ "$(cat "$d/enabled" 2>/dev/null)" = "enabled" ] || continue
+    m="$(head -1 "$d/modes" 2>/dev/null)"
+    [ -n "$m" ] && { printf '%s' "$m"; return; }
+  done
+  printf ''
+}
+
+configured_mode() {
+  [ -n "$CMDLINE" ] || { printf 'native'; return; }
+  if grep -qE 'video=HDMI-A-[0-9]+:1920x1080' "$CMDLINE" 2>/dev/null; then
+    printf '1080p'
+  else
+    printf 'native'
+  fi
+}
+
+# Push the mode to the running compositor so the toggle isn't reboot-only.
+# Entirely best-effort: no session, no wlr-randr, or a compositor that refuses
+# the mode all just mean "it'll take effect on reboot".
+apply_runtime() {
+  local mode="$1" out="$2" sock runtime uid wd
+  for sock in /run/user/*/wayland-0 /run/user/*/wayland-1; do
+    [ -S "$sock" ] || continue
+    runtime="$(dirname "$sock")"; uid="${runtime##*/}"; wd="$(basename "$sock")"
+    if command -v wlr-randr >/dev/null 2>&1; then
+      if [ "$mode" = "1080p" ]; then
+        sudo -u "#$uid" env XDG_RUNTIME_DIR="$runtime" WAYLAND_DISPLAY="$wd" \
+          wlr-randr --output "$out" --mode "$MODE_1080P" >/dev/null 2>&1 && return 0
+      else
+        sudo -u "#$uid" env XDG_RUNTIME_DIR="$runtime" WAYLAND_DISPLAY="$wd" \
+          wlr-randr --output "$out" --preferred >/dev/null 2>&1 && return 0
+      fi
+    fi
+  done
+  # X11 names the connector differently (HDMI-1, not HDMI-A-1) — try both.
+  if command -v xrandr >/dev/null 2>&1; then
+    local xout="${out/HDMI-A-/HDMI-}" u
+    for u in /run/user/*/; do
+      uid="${u%/}"; uid="${uid##*/}"
+      if [ "$mode" = "1080p" ]; then
+        sudo -u "#$uid" env DISPLAY=:0 xrandr --output "$xout" --mode 1920x1080 >/dev/null 2>&1 && return 0
+        sudo -u "#$uid" env DISPLAY=:0 xrandr --output "$out" --mode 1920x1080 >/dev/null 2>&1 && return 0
+      else
+        sudo -u "#$uid" env DISPLAY=:0 xrandr --output "$xout" --auto >/dev/null 2>&1 && return 0
+        sudo -u "#$uid" env DISPLAY=:0 xrandr --output "$out" --auto >/dev/null 2>&1 && return 0
+      fi
+    done
+  fi
+  return 1
+}
+
+# Does the screen right now match what we asked for? Only ever answers from
+# observed state — a mode-set tool exiting 0 does not mean the mode changed.
+#   "yes"     live output already matches the setting
+#   "no"      live output disagrees; a reboot will fix it
+#   "unknown" nothing is plugged in, so there is nothing to compare
+mode_matches() {
+  local want="$1" live
+  live="$(live_mode)"
+  [ -n "$live" ] || { printf 'unknown'; return; }
+  case "$want" in
+    1080p) [ "$live" = "1920x1080" ] && printf 'yes' || printf 'no' ;;
+    *)     printf 'yes' ;;  # "native" is whatever the panel prefers
+  esac
+}
+
+cmd_display_get() {
+  local out live cfg match
+  out="$(detect_output)"
+  live="$(live_mode)"
+  cfg="$(configured_mode)"
+  match="$(mode_matches "$cfg")"
+  printf '{"mode":"%s","output":"%s","live":"%s","pending":%s,"supported":%s}\n' \
+    "$(jstr "$cfg")" "$(jstr "$out")" "$(jstr "$live")" \
+    "$([ "$match" = "no" ] && echo true || echo false)" \
+    "$([ -n "$CMDLINE" ] && echo true || echo false)"
+}
+
+cmd_display_set() {
+  local want="${1:-}" out line new
+  case "$want" in
+    1080p|native) ;;
+    *) die 'Display mode must be 1080p or native' ;;
+  esac
+  [ -n "$CMDLINE" ] || die 'No cmdline.txt found — this only works on a Raspberry Pi'
+
+  out="$(detect_output)"
+  # cmdline.txt is a SINGLE line of kernel parameters with no trailing
+  # newline. Read it as-is, drop any video= we set before, re-add if wanted.
+  line="$(tr -d '\n' < "$CMDLINE")"
+  new="$(printf '%s' "$line" | sed -E 's/[[:space:]]*video=HDMI-A-[0-9]+:[^[:space:]]*//g')"
+  if [ "$want" = "1080p" ]; then
+    new="$new video=$out:$MODE_1080P"
+  fi
+  new="$(printf '%s' "$new" | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//')"
+
+  if [ "$new" != "$line" ]; then
+    [ -f "$CMDLINE.party-station.bak" ] || cp -p "$CMDLINE" "$CMDLINE.party-station.bak" 2>/dev/null
+    # Atomic: write beside the target (same filesystem) then rename, so a
+    # power cut mid-write can never leave an unbootable half-line.
+    printf '%s' "$new" > "$CMDLINE.tmp.$$" || die "Could not write $CMDLINE"
+    chmod --reference="$CMDLINE" "$CMDLINE.tmp.$$" 2>/dev/null
+    mv -f "$CMDLINE.tmp.$$" "$CMDLINE" || { rm -f "$CMDLINE.tmp.$$"; die "Could not replace $CMDLINE"; }
+    sync
+  fi
+
+  # Try to take effect now, then judge by what the screen actually reports.
+  # With no display attached there is nothing to verify and nothing to fix
+  # yet — the setting lands at the next boot either way.
+  apply_runtime "$want" "$out" >/dev/null 2>&1
+  local match reboot
+  match="$(mode_matches "$want")"
+  case "$match" in
+    yes)     reboot=false ;;
+    no)      reboot=true ;;
+    *)       reboot=true ;;
+  esac
+  printf '{"ok":true,"mode":"%s","output":"%s","applied":%s,"reboot":%s}\n' \
+    "$(jstr "$want")" "$(jstr "$out")" \
+    "$([ "$match" = "yes" ] && echo true || echo false)" "$reboot"
+}
+
+# ------------------------------------------------------------------- network
+
+need_nm() {
+  command -v nmcli >/dev/null 2>&1 || die 'NetworkManager (nmcli) is not installed on this machine'
+}
+
+wifi_iface() {
+  nmcli -t -f DEVICE,TYPE device status 2>/dev/null | awk -F: '$2=="wifi"{print $1; exit}'
+}
+
+# nmcli -t escapes ':' inside values as '\:'. Split on unescaped colons only.
+NMSPLIT='
+function nmsplit(s, arr,   i, n, c, cur) {
+  n = 0; cur = "";
+  for (i = 1; i <= length(s); i++) {
+    c = substr(s, i, 1);
+    if (c == "\\") { i++; cur = cur substr(s, i, 1); }
+    else if (c == ":") { arr[++n] = cur; cur = ""; }
+    else cur = cur c;
+  }
+  arr[++n] = cur;
+  return n;
+}
+function jesc(s) {
+  gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s);
+  gsub(/\t/, "\\t", s); gsub(/\n/, "", s); gsub(/\r/, "", s);
+  return s;
+}'
+
+# A saved profile's name is NOT its SSID — Raspberry Pi OS ships one called
+# "preconfigured" for whatever network was flashed in. Always resolve through
+# 802-11-wireless.ssid so "forget this network" matches what the user sees.
+wifi_profile_uuids() {
+  nmcli -t -f UUID,TYPE connection show 2>/dev/null | awk -F: '$2 ~ /wireless/ {print $1}'
+}
+
+profile_ssid() {
+  nmcli -t -f 802-11-wireless.ssid connection show "$1" 2>/dev/null | cut -d: -f2-
+}
+
+# UUIDs of every saved profile for a given SSID.
+profiles_for_ssid() {
+  local want="$1" u s
+  while IFS= read -r u; do
+    [ -n "$u" ] || continue
+    s="$(profile_ssid "$u")"
+    [ "$s" = "$want" ] && printf '%s\n' "$u"
+  done < <(wifi_profile_uuids)
+}
+
+active_ssid() {
+  local iface="${1:-}"
+  [ -n "$iface" ] || return 0
+  nmcli -t -e yes -f ACTIVE,SSID device wifi list ifname "$iface" 2>/dev/null \
+    | awk "$NMSPLIT"'{ n = nmsplit($0, f); if (f[1] == "yes") { print f[2]; exit } }'
+}
+
+# Every routable IPv4 address. `scope global` drops loopback for us, and this
+# reads the kernel directly rather than trusting NetworkManager's view.
+host_ips() {
+  ip -4 -o addr show scope global 2>/dev/null | awk '{split($4, a, "/"); print a[1]}'
+}
+
+cmd_net_status() {
+  need_nm
+  local iface ssid signal ips saved hostname_
+  iface="$(wifi_iface)"
+  ssid="$(active_ssid "$iface")"
+  signal=""
+  if [ -n "$iface" ]; then
+    signal="$(nmcli -t -f IN-USE,SIGNAL device wifi list ifname "$iface" 2>/dev/null \
+      | awk -F: '$1=="*"{print $2; exit}')"
+  fi
+  ips="$(host_ips | awk -v q='"' '{printf "%s%s%s%s", (NR>1?",":""), q, $0, q}')"
+  saved="$(while IFS= read -r u; do [ -n "$u" ] && profile_ssid "$u"; done < <(wifi_profile_uuids) \
+    | grep -v '^$' | sort -u \
+    | awk "$NMSPLIT"'{printf "%s\"%s\"", (NR>1?",":""), jesc($0)}')"
+  hostname_="$(hostname 2>/dev/null | tr 'A-Z' 'a-z')"
+  printf '{"iface":"%s","ssid":"%s","signal":%s,"ips":[%s],"saved":[%s],"host":"%s"}\n' \
+    "$(jstr "$iface")" "$(jstr "$ssid")" "${signal:-null}" "$ips" "$saved" "$(jstr "$hostname_")"
+}
+
+cmd_net_scan() {
+  need_nm
+  local iface
+  iface="$(wifi_iface)"
+  [ -n "$iface" ] || die 'No Wi-Fi adapter found on this machine'
+  nmcli device wifi rescan ifname "$iface" >/dev/null 2>&1
+  # Strongest signal wins per SSID; unnamed (hidden) networks are unusable
+  # from a picker, so drop them.
+  nmcli -t -e yes -f SSID,SIGNAL,SECURITY,IN-USE device wifi list ifname "$iface" 2>/dev/null \
+    | awk "$NMSPLIT"'
+      { n = nmsplit($0, f);
+        if (n < 4) next;
+        ssid = f[1];
+        if (ssid == "") next;
+        sig = f[2] + 0;
+        if (!(ssid in best) || sig > best[ssid]) {
+          best[ssid] = sig; sec[ssid] = f[3]; use[ssid] = (f[4] == "*");
+        }
+        if (use[ssid]) inuse[ssid] = 1;
+      }
+      END {
+        printf "{\"networks\":[";
+        first = 1;
+        for (s in best) {
+          printf "%s{\"ssid\":\"%s\",\"signal\":%d,\"secured\":%s,\"current\":%s}",
+            (first ? "" : ","), jesc(s), best[s],
+            (sec[s] == "" ? "false" : "true"),
+            (s in inuse ? "true" : "false");
+          first = 0;
+        }
+        printf "]}\n";
+      }'
+}
+
+active_wifi_uuid() {
+  nmcli -t -f UUID,TYPE,DEVICE connection show --active 2>/dev/null \
+    | awk -F: '$2 ~ /wireless/ {print $1; exit}'
+}
+
+cmd_net_connect() {
+  need_nm
+  local ssid="${1:-}" psk iface prev uuid file slug
+  [ -n "$ssid" ] || die 'Pick a network first'
+  case "$ssid" in *$'\n'*|*$'\r'*) die 'That network name is not usable' ;; esac
+  [ ${#ssid} -le 32 ] || die 'That network name is too long'
+
+  # Passphrase on stdin, never argv — /proc/<pid>/cmdline is world-readable.
+  IFS= read -r psk || psk=""
+
+  iface="$(wifi_iface)"
+  [ -n "$iface" ] || die 'No Wi-Fi adapter found on this machine'
+  prev="$(active_wifi_uuid)"
+
+  uuid="$(cat /proc/sys/kernel/random/uuid)"
+  slug="$(printf '%s' "$ssid" | tr -c 'A-Za-z0-9._-' '_' | cut -c1-32)"
+  file="$NM_DIR/party-$slug-${uuid%%-*}.nmconnection"
+
+  # Write a NetworkManager keyfile directly rather than passing the
+  # passphrase through nmcli's argv.
+  {
+    printf '[connection]\nid=%s\nuuid=%s\ntype=wifi\ninterface-name=%s\nautoconnect=true\n\n' \
+      "$ssid" "$uuid" "$iface"
+    printf '[wifi]\nmode=infrastructure\nssid=%s\n\n' "$ssid"
+    if [ -n "$psk" ]; then
+      printf '[wifi-security]\nkey-mgmt=wpa-psk\npsk=%s\n\n' "$psk"
+    fi
+    printf '[ipv4]\nmethod=auto\n\n[ipv6]\nmethod=auto\naddr-gen-mode=default\n'
+  } > "$file" || die 'Could not save the network profile'
+  chmod 600 "$file"
+  chown root:root "$file" 2>/dev/null
+
+  nmcli connection load "$file" >/dev/null 2>&1
+
+  local err=""
+  if ! err="$(nmcli --wait 30 connection up uuid "$uuid" 2>&1)"; then
+    # Rolling back matters more than the error message: a box that fails to
+    # join a new network while travelling has to come back on the old one by
+    # itself, or it's unreachable until someone finds a keyboard.
+    nmcli connection delete uuid "$uuid" >/dev/null 2>&1
+    rm -f "$file"
+    if [ -n "$prev" ]; then
+      nmcli --wait 30 connection up uuid "$prev" >/dev/null 2>&1
+    fi
+    case "$err" in
+      *[Ss]ecrets*|*[Pp]assword*|*802-11-wireless-security*)
+        die 'Wrong password for that network — still on the old one' ;;
+      *[Tt]imeout*|*timed\ out*)
+        die 'That network did not respond in time — still on the old one' ;;
+      *)
+        die 'Could not join that network — still on the old one' ;;
+    esac
+  fi
+
+  # Joined. Drop any older saved profile for the same SSID so the list
+  # doesn't fill with duplicates every time we re-join a network.
+  local old
+  while IFS= read -r old; do
+    [ -n "$old" ] && [ "$old" != "$uuid" ] && nmcli connection delete uuid "$old" >/dev/null 2>&1
+  done < <(profiles_for_ssid "$ssid")
+
+  sleep 1
+  local ips
+  ips="$(host_ips | awk -v q='"' '{printf "%s%s%s%s", (NR>1?",":""), q, $0, q}')"
+  printf '{"ok":true,"ssid":"%s","ips":[%s]}\n' "$(jstr "$ssid")" "$ips"
+}
+
+cmd_net_forget() {
+  need_nm
+  local ssid="${1:-}" uuid n=0 active
+  [ -n "$ssid" ] || die 'Pick a network first'
+  active="$(active_ssid "$(wifi_iface)")"
+  [ "$active" = "$ssid" ] && die 'That is the network you are on right now — join another one first'
+  while IFS= read -r uuid; do
+    [ -n "$uuid" ] || continue
+    nmcli connection delete uuid "$uuid" >/dev/null 2>&1 && n=$((n + 1))
+  done < <(profiles_for_ssid "$ssid")
+  [ "$n" -gt 0 ] || die 'No saved network by that name'
+  printf '{"ok":true,"removed":%d}\n' "$n"
+}
+
+# ---------------------------------------------------------------------- main
+
+cmd_reboot() {
+  # Answer before going down, so the caller gets a clean JSON reply instead of
+  # a dropped socket.
+  printf '{"ok":true}\n'
+  ( sleep 2; systemctl reboot || reboot ) >/dev/null 2>&1 &
+}
+
+case "${1:-}" in
+  display-get)  cmd_display_get ;;
+  display-set)  cmd_display_set "${2:-}" ;;
+  net-status)   cmd_net_status ;;
+  net-scan)     cmd_net_scan ;;
+  net-connect)  cmd_net_connect "${2:-}" ;;
+  net-forget)   cmd_net_forget "${2:-}" ;;
+  reboot)       cmd_reboot ;;
+  *) die 'Unknown command' ;;
+esac

@@ -404,6 +404,88 @@ canvas.arcade { background: var(--felt-deep); border-radius: 18px; box-shadow: 0
 .pad-menu-item.dis { opacity: .35; }
 .pad-menu-item.on::after { content: ' ✓'; color: var(--board); }
 .pad-menu-item.focus.on::after { color: #06281a; }
+/* Card piles (Spite & Malice): a card with a caption under it. `.live` marks
+   a pile the picked card can legally go on; `.can` marks a pile you can play
+   FROM; `.sel` is the currently picked source. */
+.pile {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  background: none; border: 0; padding: 2px; color: inherit; font: inherit;
+}
+.pile-need {
+  font-size: 12px; color: var(--chalk-dim); font-weight: 700;
+  letter-spacing: .3px; white-space: nowrap;
+}
+.pile.live .pcard, .pile.can .pcard {
+  outline: 3px solid var(--marquee); outline-offset: 2px;
+}
+.pile.live { animation: breathe 1.4s ease-in-out infinite; }
+.pile.sel .pcard { outline: 3px solid var(--ok); outline-offset: 2px; transform: translateY(-6px); }
+.pile:disabled { opacity: .55; }
+.pile.mini .pile-need { font-size: 11px; }
+.tv .pile-need { font-size: 16px; }
+.tv .pile.mini .pile-need { font-size: 13px; }
+
+/* Picking a source card that isn't in your hand (the payoff pile). */
+.srcbtn {
+  display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+  background: var(--raised); border: 2px solid transparent; border-radius: 12px;
+  color: inherit; font: inherit; cursor: pointer;
+}
+.srcbtn.can { border-color: var(--marquee); }
+.srcbtn.sel { border-color: var(--ok); }
+.srcbtn:disabled { opacity: .6; cursor: default; }
+.srcbtn-txt { display: flex; flex-direction: column; align-items: flex-start; font-size: 13px; line-height: 1.25; }
+
+/* Jokers are wild — mark them clearly, since they have no suit to read. */
+.pcard.joker { color: #b98bff; }
+.pcard.joker .s { font-size: 1.9em; }
+
+/* TV settings screen: a d-pad-driven list, sized to read from a sofa. */
+.set-list { display: flex; flex-direction: column; gap: 10px; }
+.set-row {
+  padding: 15px 22px; border-radius: 12px; font-weight: 700; font-size: 25px;
+  background: var(--raised); box-shadow: 0 4px 0 var(--edge);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.set-row.focus { background: var(--marquee); color: #241a02; box-shadow: 0 4px 0 var(--marquee-edge); }
+
+/* On-screen keyboard (Wi-Fi passwords typed with a controller). */
+.osk { display: flex; flex-direction: column; align-items: center; gap: 16px; }
+.osk-title { font-size: 24px; color: var(--chalk-dim); font-weight: 800; }
+.osk-field {
+  min-width: min(760px, 80vw); min-height: 62px; padding: 12px 20px;
+  background: var(--raised-2); border-radius: 12px; box-shadow: inset 0 3px 0 var(--edge);
+  font-size: 30px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  word-break: break-all; display: flex; align-items: center;
+}
+.osk-grid { display: flex; flex-direction: column; gap: 8px; }
+.osk-row { display: flex; gap: 8px; justify-content: center; }
+.osk-key {
+  width: 62px; height: 62px; display: flex; align-items: center; justify-content: center;
+  background: var(--raised); border-radius: 10px; box-shadow: 0 3px 0 var(--edge);
+  font-size: 27px; font-weight: 700;
+}
+.osk-key.focus {
+  background: var(--marquee); color: #241a02; box-shadow: 0 3px 0 var(--marquee-edge);
+  transform: translateY(-2px);
+}
+.osk-hints { display: flex; gap: 20px; flex-wrap: wrap; justify-content: center; font-size: 17px; color: var(--chalk-dim); }
+
+/* Unlock code, shown only on the TV — a phone must read it off the screen
+   before it may change the network (see server/settings.js). */
+.pin-overlay {
+  position: fixed; inset: 0; z-index: 60; display: flex;
+  align-items: center; justify-content: center; background: #060814d9;
+}
+.pin-card {
+  background: var(--raised); border-radius: 24px; padding: 40px 60px; text-align: center;
+  box-shadow: 0 8px 0 var(--edge), 0 30px 90px #000d;
+}
+.pin-card .code {
+  font-size: 116px; font-weight: 900; letter-spacing: 22px; color: var(--marquee);
+  font-variant-numeric: tabular-nums; margin: 10px 0 0 18px; line-height: 1.1;
+}
+
 /* Peek panels (hold Y on a controller): bottom-right, mirroring the pad
    menus bottom-left, floating over the 2D game view. */
 .peek-panels {

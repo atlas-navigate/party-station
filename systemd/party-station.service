@@ -15,7 +15,14 @@ Environment=NODE_ENV=production
 # Lets node bind port 80 without running as root.
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
-NoNewPrivileges=true
+# No NoNewPrivileges here: switching Wi-Fi and capping the display mode need
+# root, and this service reaches it through sudo, which setuid-execs and so is
+# blocked outright by NoNewPrivileges. The privilege is narrow by construction
+# instead — /etc/sudoers.d/party-station grants exactly one root-owned binary,
+# /usr/local/sbin/party-station-ctl (scripts/psctl), which accepts a fixed set
+# of subcommands. It lives outside the app directory on purpose: the app user
+# and the self-updater's `git reset --hard` can both rewrite anything under
+# __APP_DIR__, so a sudoers rule pointing there would be root-equivalent.
 Restart=always
 RestartSec=2
 # The self-updater exits(0) after a successful git pull; Restart=always

@@ -6,6 +6,7 @@ import { spawn, execFileSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import * as sysctl from './sysctl.js';
 
 export const ROMS_DIR = process.env.ROMS_DIR || path.join(os.homedir(), 'RetroPie', 'roms');
 const LIBRETRO_DIRS = [
@@ -240,10 +241,23 @@ export function launch(systemId, file, onExit) {
   // looked up in RetroPie/BIOS no matter which retroarch.cfg is in play.
   const extraCfg = path.join(os.tmpdir(), 'party-station-retroarch-append.cfg');
   const args = ['-L', sys.core, romPath, '--fullscreen'];
+  const lines = [
+    ...[1, 2, 3, 4].map(n => `input_player${n}_analog_dpad_mode = "1"`),
+    `system_directory = "${path.join(ROMS_DIR, '..', 'BIOS')}"`,
+  ];
+  // Belt and braces on the display cap. The kernel `video=` setting normally
+  // means RetroArch already sees a 1080p screen, but if that hasn't taken
+  // effect yet (set but not rebooted, or a compositor that ignored it), a
+  // bare --fullscreen opens a 2160p surface and scales a 240p framebuffer
+  // into it every frame. A Pi 4 can't hold 60fps doing that, and because
+  // RetroArch clocks audio off the video sync, the dropped frames come out
+  // as crackling and pitch drift — the "sound gets destroyed" symptom.
+  if (sysctl.displayModeNow() === '1080p') {
+    lines.push('video_fullscreen_x = "1920"', 'video_fullscreen_y = "1080"',
+      'video_windowed_fullscreen = "false"');
+  }
   try {
-    fs.writeFileSync(extraCfg,
-      [1, 2, 3, 4].map(n => `input_player${n}_analog_dpad_mode = "1"`).join('\n')
-      + `\nsystem_directory = "${path.join(ROMS_DIR, '..', 'BIOS')}"\n`);
+    fs.writeFileSync(extraCfg, lines.join('\n') + '\n');
     args.push('--appendconfig', extraCfg);
   } catch {}
   let proc;
