@@ -280,10 +280,15 @@ cmd_net_scan() {
   iface="$(wifi_iface)"
   [ -n "$iface" ] || die 'No Wi-Fi adapter found on this machine'
   nmcli device wifi rescan ifname "$iface" >/dev/null 2>&1
+  # nmcli's IN-USE marker briefly clears while a rescan is in flight, which
+  # would show the network we're sitting on as joinable. Take the active SSID
+  # from the device instead and trust that over the scan flag.
+  local active
+  active="$(active_ssid "$iface")"
   # Strongest signal wins per SSID; unnamed (hidden) networks are unusable
   # from a picker, so drop them.
   nmcli -t -e yes -f SSID,SIGNAL,SECURITY,IN-USE device wifi list ifname "$iface" 2>/dev/null \
-    | awk "$NMSPLIT"'
+    | awk -v active="$active" "$NMSPLIT"'
       { n = nmsplit($0, f);
         if (n < 4) next;
         ssid = f[1];
@@ -293,6 +298,7 @@ cmd_net_scan() {
           best[ssid] = sig; sec[ssid] = f[3]; use[ssid] = (f[4] == "*");
         }
         if (use[ssid]) inuse[ssid] = 1;
+        if (active != "" && ssid == active) inuse[ssid] = 1;
       }
       END {
         printf "{\"networks\":[";
